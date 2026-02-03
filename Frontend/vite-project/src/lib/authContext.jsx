@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
-import { authApi } from './api'; // Adjust import path as needed
+import { authApi } from './api'; // Adjust path as needed
 
 const AuthContext = createContext(undefined);
 
@@ -7,13 +7,10 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
     const storedUser = localStorage.getItem('lendwise_user');
     const token = localStorage.getItem('token');
-    const refreshToken = localStorage.getItem('refreshToken');
     
     try {
       if (storedUser && token) {
-        const parsedUser = JSON.parse(storedUser);
-        // Optionally validate token here or check expiry
-        return parsedUser;
+        return JSON.parse(storedUser);
       }
       return null;
     } catch (e) {
@@ -21,12 +18,15 @@ export function AuthProvider({ children }) {
     }
   });
 
+  /* ================= LOGIN ================= */
   const login = useCallback(async (email, password) => {
     try {
       const response = await authApi.login({ email, password });
-      const { token, refreshToken, user: userData } = response.data;
+      // Destructure fields based on your AuthResponse DTO
+      const { token, refreshToken, name, userId, email: userEmail, roles } = response.data;
       
-      // Store tokens and user data
+      const userData = { id: userId, name, email: userEmail, roles };
+      
       localStorage.setItem('token', token);
       localStorage.setItem('refreshToken', refreshToken);
       localStorage.setItem('lendwise_user', JSON.stringify(userData));
@@ -42,32 +42,18 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  const logout = useCallback(async () => {
+  /* ================= REGISTER ================= */
+  // FIXED: Now accepts a single object (registrationData) 
+  // This prevents the nested object START_OBJECT error in Java
+  const register = useCallback(async (registrationData) => {
     try {
-      await authApi.logout();
-    } catch (error) {
-      console.error('Logout error:', error);
-      // Continue with client-side logout even if API call fails
-    } finally {
-      // Clear all auth-related storage
-      localStorage.removeItem('token');
-      localStorage.removeItem('refreshToken');
-      localStorage.removeItem('lendwise_user');
-      setUser(null);
-    }
-  }, []);
-
-  const register = useCallback(async (name, email, password) => {
-    try {
-      const response = await authApi.register({ 
-        name, 
-        email, 
-        password 
-      });
+      const response = await authApi.register(registrationData);
       
-      const { token, refreshToken, user: userData } = response.data;
+      // Destructure the response from your backend AuthResponse
+      const { token, refreshToken, name, userId, email, roles } = response.data;
       
-      // Store tokens and user data
+      const userData = { id: userId, name, email, roles };
+      
       localStorage.setItem('token', token);
       localStorage.setItem('refreshToken', refreshToken);
       localStorage.setItem('lendwise_user', JSON.stringify(userData));
@@ -78,30 +64,25 @@ export function AuthProvider({ children }) {
       console.error('Registration error:', error);
       return { 
         success: false, 
-        error: error.response?.data?.message || 'Registration failed. Please try again.' 
+        message: error.response?.data?.message || 'Registration failed.',
+        details: error.response?.data?.details // Includes Spring Validation errors
       };
     }
   }, []);
 
-  // Optional: Function to refresh user data from backend
-  const refreshUserData = useCallback(async () => {
-    if (!user) return;
-    
+  /* ================= LOGOUT ================= */
+  const logout = useCallback(async () => {
     try {
-      const response = await userApi.getProfile();
-      const updatedUser = { ...user, ...response.data };
-      localStorage.setItem('lendwise_user', JSON.stringify(updatedUser));
-      setUser(updatedUser);
-      return updatedUser;
+      await authApi.logout();
     } catch (error) {
-      console.error('Failed to refresh user data:', error);
-      // If unauthorized, force logout
-      if (error.response?.status === 401) {
-        logout();
-      }
-      return user;
+      console.error('Logout error:', error);
+    } finally {
+      localStorage.removeItem('token');
+      localStorage.removeItem('refreshToken');
+      localStorage.removeItem('lendwise_user');
+      setUser(null);
     }
-  }, [user, logout]);
+  }, []);
 
   return (
     <AuthContext.Provider value={{ 
@@ -109,8 +90,7 @@ export function AuthProvider({ children }) {
       isAuthenticated: !!user, 
       login, 
       logout, 
-      register,
-      refreshUserData 
+      register 
     }}>
       {children}
     </AuthContext.Provider>

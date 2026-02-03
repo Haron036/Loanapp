@@ -9,7 +9,7 @@ const api = axios.create({
   },
 });
 
-// Add token to requests
+// Request Interceptor: Attach JWT Token
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
@@ -21,24 +21,21 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Handle token refresh on 401
+// Response Interceptor: Handle Token Refresh and 401s
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-    
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
-      
       try {
         const refreshToken = localStorage.getItem('refreshToken');
-        const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
-          refreshToken
-        });
+        if (!refreshToken) throw new Error("No refresh token");
         
+        const response = await axios.post(`${API_BASE_URL}/auth/refresh`, { refreshToken });
         const { token } = response.data;
-        localStorage.setItem('token', token);
         
+        localStorage.setItem('token', token);
         originalRequest.headers.Authorization = `Bearer ${token}`;
         return api(originalRequest);
       } catch (refreshError) {
@@ -47,155 +44,66 @@ api.interceptors.response.use(
         return Promise.reject(refreshError);
       }
     }
-    
     return Promise.reject(error);
   }
 );
 
-// Utility functions
+/**
+ * UTILITY FUNCTIONS
+ */
 export function formatCurrency(amount, currency = 'USD') {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: currency,
-  }).format(amount);
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount || 0);
 }
 
 export function formatDate(dateString) {
-  const date = new Date(dateString);
-  return new Intl.DateTimeFormat('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  }).format(date);
+  if (!dateString) return 'N/A';
+  return new Intl.DateTimeFormat('en-US', { 
+    year: 'numeric', 
+    month: 'short', 
+    day: 'numeric' 
+  }).format(new Date(dateString));
 }
 
-export function formatDateTime(dateString) {
-  const date = new Date(dateString);
-  return new Intl.DateTimeFormat('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date);
-}
-
-export function formatPercent(value) {
-  return new Intl.NumberFormat('en-US', {
-    style: 'percent',
-    minimumFractionDigits: 1,
-    maximumFractionDigits: 2,
-  }).format(value / 100);
-}
-// Credit score utilities
 export function getCreditScoreCategory(score) {
-  if (score >= 800) {
-    return { 
-      label: 'Excellent', 
-      color: 'text-green-600',
-      description: 'Exceptional credit'
-    };
-  } else if (score >= 740) {
-    return { 
-      label: 'Very Good', 
-      color: 'text-green-500',
-      description: 'Strong credit'
-    };
-  } else if (score >= 670) {
-    return { 
-      label: 'Good', 
-      color: 'text-blue-500',
-      description: 'Average credit'
-    };
-  } else if (score >= 580) {
-    return { 
-      label: 'Fair', 
-      color: 'text-yellow-500',
-      description: 'Below average credit'
-    };
-  } else {
-    return { 
-      label: 'Poor', 
-      color: 'text-red-500',
-      description: 'Poor credit'
-    };
-  }
+  if (score >= 800) return { label: 'Excellent', color: 'text-green-600', description: 'Exceptional' };
+  if (score >= 740) return { label: 'Very Good', color: 'text-green-500', description: 'Strong' };
+  if (score >= 670) return { label: 'Good', color: 'text-blue-500', description: 'Average' };
+  if (score >= 580) return { label: 'Fair', color: 'text-yellow-500', description: 'Below average' };
+  return { label: 'Poor', color: 'text-red-500', description: 'Poor credit' };
 }
 
-export function getCreditScoreColor(score) {
-  if (score >= 800) return 'text-green-600';
-  if (score >= 740) return 'text-green-500';
-  if (score >= 670) return 'text-blue-500';
-  if (score >= 580) return 'text-yellow-500';
-  return 'text-red-500';
-}
+/**
+ * API MODULES
+ */
 
-// Admin-specific API calls
-export const adminApi = {
-  // Get all loans (admin view)
-  getAllLoans: (page = 0, size = 50) => api.get(`/admin/loans?page=${page}&size=${size}`),
-  
-  // Get admin analytics
-  getAnalytics: () => api.get('/admin/analytics'),
-  
-  // Get monthly applications data
-  getMonthlyApplications: (year = new Date().getFullYear()) => 
-    api.get(`/admin/analytics/monthly?year=${year}`),
-  
-  // Get loan status distribution
-  getLoanStatusDistribution: () => api.get('/admin/analytics/status-distribution'),
-  
-  // Get admin stats
-  getStats: () => api.get('/admin/stats'),
-  
-  // Update loan status (admin)
-  updateLoanStatus: (loanId, status, notes = '') => 
-    api.put(`/admin/loans/${loanId}/status`, { status, notes }),
-};
-
-
-// Dashboard-specific API calls
-export const dashboardApi = {
-  // Get user dashboard data
-  getDashboardData: () => api.get('/users/me/dashboard'),
-  
-  // Get user loans
-  getUserLoans: () => api.get('/loans/my-loans'),
-  
-  // Get loan repayments
-  getLoanRepayments: (loanId) => api.get(`/loans/${loanId}/repayments`),
-  
-  // Get loan summary
-  getLoanSummary: () => api.get('/loans/summary'),
-  
-  // Get user stats
-  getUserStats: () => api.get('/users/me/stats'),
-};
-
+// Auth Endpoints
 export const authApi = {
   login: (credentials) => api.post('/auth/login', credentials),
   register: (userData) => api.post('/auth/register', userData),
   logout: () => api.post('/auth/logout'),
-  refresh: (refreshToken) => api.post('/auth/refresh', { refreshToken }),
 };
 
+// Loan Endpoints (User perspective)
 export const loanApi = {
   getAll: () => api.get('/loans'),
   getById: (id) => api.get(`/loans/${id}`),
-  create: (loanData) => api.post('/loans', loanData),
   getSummary: () => api.get('/loans/summary'),
-  approve: (id, notes) => api.put(`/loans/${id}/approve`, { notes }),
-  reject: (id, reason) => api.put(`/loans/${id}/reject`, { reason }),
-  disburse: (id) => api.put(`/loans/${id}/disburse`),
-  getByStatus: (status, page = 0, size = 20) => 
-    api.get(`/loans/status/${status}?page=${page}&size=${size}`),
+  getRepayments: (loanId) => api.get(`/loans/${loanId}/repayments`),
+  create: (loanData) => api.post('/loans', loanData),
+  // These are often called from Admin context as well
+  approve: (id, note) => api.put(`/admin/loans/${id}/approve`, { note }),
+  reject: (id, note) => api.put(`/admin/loans/${id}/reject`, { note }),
 };
 
+// User Endpoints
 export const userApi = {
   getProfile: () => api.get('/users/me'),
-  updateProfile: (userData) => api.put('/users/me', userData),
-  changePassword: (data) => api.put('/users/me/change-password', data),
-  getUsers: () => api.get('/users'),
+};
+
+// Admin Endpoints (REQUIRED for Admin.jsx)
+export const adminApi = {
+  getAllLoans: () => api.get('/admin/loans'),
+  getAnalytics: () => api.get('/admin/analytics'),
 };
 
 export default api;
