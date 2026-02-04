@@ -7,8 +7,8 @@ import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
-import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -22,10 +22,11 @@ import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.util.Arrays;
-import java.util.Collections;
+import java.util.List;
 
 @Configuration
 @EnableWebSecurity
+@EnableMethodSecurity // Required to make @PreAuthorize work in your Controller
 @RequiredArgsConstructor
 public class SecurityConfig {
 
@@ -44,43 +45,47 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                // 1. Apply CORS configuration first
+                // 1. CORS & CSRF
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
-
-                // 2. Disable CSRF for Stateless JWT API
                 .csrf(AbstractHttpConfigurer::disable)
 
+                // 2. Request Authorization
                 .authorizeHttpRequests(auth -> auth
-                        // Allow all pre-flight OPTIONS requests
+                        // Allow Pre-flight OPTIONS requests for CORS
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
-                        // Public endpoints (Note: No "/api" prefix here)
+                        // Public API Endpoints
                         .requestMatchers(
-                                "/auth/**",
-                                "/public/**",
-                                "/v3/api-docs/**",
-                                "/swagger-ui/**",
-                                "/swagger-ui.html",
-                                "/api-docs/**",
+                                "/api/auth/**",
+                                "/api/public/**",
                                 "/error"
                         ).permitAll()
 
-                        // Role-based protection
-                        .requestMatchers("/admin/**").hasRole("ADMIN")
-                        .requestMatchers("/user/**").hasAnyRole("USER", "ADMIN")
+                        // Swagger / Documentation (if applicable)
+                        .requestMatchers(
+                                "/v3/api-docs/**",
+                                "/swagger-ui/**",
+                                "/swagger-ui.html"
+                        ).permitAll()
 
-                        // Secure everything else
+                        // Secured API Endpoints
+                        // We permit these at the security level so that @PreAuthorize
+                        // inside LoanController can handle the specific roles.
+                        .requestMatchers("/api/loans/**").authenticated()
+                        .requestMatchers("/api/users/**").authenticated()
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
+
+                        // Catch-all
                         .anyRequest().authenticated()
                 )
 
-                // 3. Stateless Session Management
+                // 3. Stateless Sessions (JWT)
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
 
+                // 4. Filter Ordering
                 .authenticationProvider(authenticationProvider())
-
-                // 4. JWT Filter before the standard Auth filter
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
@@ -90,41 +95,26 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
 
-        // Add your frontend origins
+        // Match your React development ports
         configuration.setAllowedOrigins(Arrays.asList(
                 "http://localhost:5173",
                 "http://localhost:3000"
         ));
 
-        // Methods to allow
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-
-        // Headers to allow
-        configuration.setAllowedHeaders(Arrays.asList(
-                "Authorization",
-                "Content-Type",
-                "X-Requested-With",
-                "Accept",
-                "Origin",
-                "Access-Control-Request-Method",
-                "Access-Control-Request-Headers"
-        ));
-
-        // Exposed Headers (Allow frontend to read these)
-        configuration.setExposedHeaders(Collections.singletonList("Authorization"));
-
+        configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "Accept", "Origin"));
+        configuration.setExposedHeaders(List.of("Authorization"));
         configuration.setAllowCredentials(true);
-        configuration.setMaxAge(3600L); // 1 hour cache for pre-flight
+        configuration.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        // Match ALL paths
+        // Ensure CORS applies to the /api pathing
         source.registerCorsConfiguration("/**", configuration);
         return source;
     }
 
     @Bean
-    public AuthenticationManager authenticationManager(
-            AuthenticationConfiguration authenticationConfiguration) throws Exception {
-        return authenticationConfiguration.getAuthenticationManager();
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
+        return config.getAuthenticationManager();
     }
 }

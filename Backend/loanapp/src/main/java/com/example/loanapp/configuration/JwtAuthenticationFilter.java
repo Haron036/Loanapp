@@ -17,7 +17,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 
 @Component
-@RequiredArgsConstructor // Using Lombok to keep it clean
+@RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
@@ -30,48 +30,43 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             @NonNull FilterChain filterChain
     ) throws ServletException, IOException {
 
-        // 1. Get the internal path (relative to the /api context)
-        final String path = request.getServletPath();
-
-        // 2. EXPLICIT SKIP: If it's an auth endpoint, don't process the token.
-        // This prevents SignatureException from blocking Login/Register requests.
-        if (path.startsWith("/auth")) {
-            filterChain.doFilter(request, response);
-            return;
-        }
-
         final String authHeader = request.getHeader("Authorization");
+        final String jwt;
+        final String userEmail;
 
-        // 3. Skip if no Bearer token is found
+        // 1. If no header or wrong format, just move to the next filter.
+        // Spring SecurityConfig will decide if the path requires auth or not.
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        final String jwt = authHeader.substring(7);
+        // 2. Extract JWT and Username
+        jwt = authHeader.substring(7);
+        userEmail = jwtService.extractUsername(jwt);
 
-        // jwtService.extractUsername now returns null safely if the signature is invalid
-        final String username = jwtService.extractUsername(jwt);
+        // 3. If there is a username and the user is not already authenticated
+        if (userEmail != null && SecurityContextHolder.getContext().getAuthentication() == null) {
+            UserDetails userDetails = this.userDetailsService.loadUserByUsername(userEmail);
 
-        // 4. If we have a username and the user isn't already authenticated in this session
-        if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-            UserDetails userDetails = this.userDetailsService.loadUserByUsername(username);
-
-            // Using the updated method name 'isTokenValid' from our JwtService rewrite
+            // 4. Validate token against database/user details
             if (jwtService.isTokenValid(jwt, userDetails)) {
                 UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
                         userDetails,
                         null,
-                        userDetails.getAuthorities()
+                        userDetails.getAuthorities() // These MUST include the ROLE_ prefix
                 );
-                authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
-                // Finalize authentication for this request
+                authToken.setDetails(
+                        new WebAuthenticationDetailsSource().buildDetails(request)
+                );
+
+                // 5. Update Security Context
                 SecurityContextHolder.getContext().setAuthentication(authToken);
             }
         }
 
-        // 5. Always continue the filter chain
+        // 6. Continue the chain
         filterChain.doFilter(request, response);
     }
 }

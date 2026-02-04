@@ -1,12 +1,12 @@
 package com.example.loanapp.Entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore; // Added import
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
-
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -16,12 +16,12 @@ import java.time.LocalDateTime;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-
 public class Repayment {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private String id;
 
+    @JsonIgnore // FIX: Prevents infinite recursion when serializing to JSON
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "loan_id", nullable = false)
     private Loan loan;
@@ -57,4 +57,3 @@ public class Repayment {
         PENDING, PAID, OVERDUE, PARTIALLY_PAID, CANCELLED
     }
 }
-

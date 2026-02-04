@@ -29,7 +29,6 @@ public class LoanService {
     private final CreditScoreService creditScoreService;
     private final NotificationService notificationService;
 
-    // Manual constructor to handle @Lazy and break circular dependency
     public LoanService(LoanRepository loanRepository,
                        RepaymentRepository repaymentRepository,
                        @Lazy UserService userService,
@@ -68,6 +67,7 @@ public class LoanService {
 
         Loan savedLoan = loanRepository.save(loan);
 
+        // Auto-approval logic
         if (creditScore >= 650 && request.getAmount().compareTo(BigDecimal.valueOf(50000)) <= 0) {
             approveLoan(savedLoan.getId(), "Auto-approved based on credit score");
         }
@@ -123,6 +123,7 @@ public class LoanService {
 
         List<Repayment> repayments = repaymentRepository.findByLoanIdOrderByDueDateAsc(loanId);
         if (!repayments.isEmpty()) {
+            // Update the first repayment date to be 1 month from disbursement
             Repayment firstRepayment = repayments.get(0);
             firstRepayment.setDueDate(LocalDate.now().plusMonths(1));
             repaymentRepository.save(firstRepayment);
@@ -131,9 +132,12 @@ public class LoanService {
         return loanRepository.save(loan);
     }
 
-    // ==========================================================
-    // MISSING METHODS ADDED BACK HERE
-    // ==========================================================
+    // ================== DATA RETRIEVAL METHODS ==================
+
+    public Loan getLoanById(String id) {
+        return loanRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Loan not found with ID: " + id));
+    }
 
     public Page<Loan> getAllLoans(Pageable pageable) {
         return loanRepository.findAll(pageable);
@@ -143,31 +147,36 @@ public class LoanService {
         return loanRepository.findByUserId(userId, pageable);
     }
 
+    public List<Loan> findByUserId(String userId) {
+        return loanRepository.findByUserId(userId);
+    }
+
     public Page<Loan> getLoansByStatus(Loan.LoanStatus status, Pageable pageable) {
         return loanRepository.findByStatus(status, pageable);
     }
 
-    public Loan getLoanById(String id) {
-        return loanRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Loan not found"));
+    // IMPORTANT: Required by LoanController for the Dashboard repayment list
+    public List<Repayment> getRepaymentsByLoanId(String loanId) {
+        return repaymentRepository.findByLoanIdOrderByDueDateAsc(loanId);
     }
-
-    // ==========================================================
 
     public LoanDTO.Summary getUserLoanSummary(String userId) {
         List<Loan> userLoans = loanRepository.findByUserId(userId);
         BigDecimal totalBorrowed = BigDecimal.ZERO;
         BigDecimal totalRepaid = BigDecimal.ZERO;
-        int activeLoans = 0;
+        int activeLoansCount = 0;
         int pendingDue = 0;
         BigDecimal monthlyPayment = BigDecimal.ZERO;
 
         for (Loan loan : userLoans) {
-            if (loan.getStatus() == Loan.LoanStatus.REPAYING || loan.getStatus() == Loan.LoanStatus.DISBURSED) {
+            if (loan.getStatus() == Loan.LoanStatus.REPAYING ||
+                    loan.getStatus() == Loan.LoanStatus.DISBURSED ||
+                    loan.getStatus() == Loan.LoanStatus.APPROVED) {
+
                 totalBorrowed = totalBorrowed.add(loan.getAmount());
-                totalRepaid = totalRepaid.add(loan.getTotalRepaid());
-                activeLoans++;
-                monthlyPayment = monthlyPayment.add(loan.getMonthlyPayment());
+                totalRepaid = totalRepaid.add(loan.getTotalRepaid() != null ? loan.getTotalRepaid() : BigDecimal.ZERO);
+                activeLoansCount++;
+                monthlyPayment = monthlyPayment.add(loan.getMonthlyPayment() != null ? loan.getMonthlyPayment() : BigDecimal.ZERO);
 
                 List<Repayment> pendingRepayments = repaymentRepository.findByLoanIdAndStatus(loan.getId(), Repayment.RepaymentStatus.PENDING);
                 pendingDue += pendingRepayments.size();
@@ -177,7 +186,7 @@ public class LoanService {
         LoanDTO.Summary summary = new LoanDTO.Summary();
         summary.setTotalBorrowed(totalBorrowed);
         summary.setTotalRepaid(totalRepaid);
-        summary.setActiveLoans(activeLoans);
+        summary.setActiveLoans(activeLoansCount);
         summary.setPendingDue(pendingDue);
         summary.setMonthlyPayment(monthlyPayment);
         summary.setAvailableCredit(BigDecimal.valueOf(100000).subtract(totalBorrowed).max(BigDecimal.ZERO));
@@ -185,17 +194,27 @@ public class LoanService {
         return summary;
     }
 
+    // ================== CALCULATION UTILITIES ==================
+
     private BigDecimal calculateInterestRate(Integer creditScore, Integer termMonths) {
         BigDecimal baseRate = BigDecimal.valueOf(6.5);
-        BigDecimal scoreAdj = (creditScore >= 750) ? BigDecimal.valueOf(-2.0) : (creditScore >= 700) ? BigDecimal.valueOf(-1.0) : (creditScore >= 600) ? BigDecimal.valueOf(1.5) : BigDecimal.valueOf(3.0);
-        BigDecimal termAdj = (termMonths > 60) ? BigDecimal.valueOf(1.0) : (termMonths > 36) ? BigDecimal.valueOf(0.5) : BigDecimal.ZERO;
+        BigDecimal scoreAdj = (creditScore >= 750) ? BigDecimal.valueOf(-2.0) :
+                (creditScore >= 700) ? BigDecimal.valueOf(-1.0) :
+                        (creditScore >= 600) ? BigDecimal.valueOf(1.5) : BigDecimal.valueOf(3.0);
+
+        BigDecimal termAdj = (termMonths > 60) ? BigDecimal.valueOf(1.0) :
+                (termMonths > 36) ? BigDecimal.valueOf(0.5) : BigDecimal.ZERO;
+
         return baseRate.add(scoreAdj).add(termAdj);
     }
 
     private BigDecimal calculateMonthlyPayment(BigDecimal principal, BigDecimal annualRate, Integer months) {
+        if (months == 0) return principal;
         BigDecimal monthlyRate = annualRate.divide(BigDecimal.valueOf(1200), 10, RoundingMode.HALF_UP);
         BigDecimal pow = BigDecimal.ONE.add(monthlyRate).pow(months);
-        return principal.multiply(monthlyRate.multiply(pow).divide(pow.subtract(BigDecimal.ONE), 10, RoundingMode.HALF_UP)).setScale(2, RoundingMode.HALF_UP);
+        return principal.multiply(monthlyRate.multiply(pow)
+                        .divide(pow.subtract(BigDecimal.ONE), 10, RoundingMode.HALF_UP))
+                .setScale(2, RoundingMode.HALF_UP);
     }
 
     private void generateRepaymentSchedule(Loan loan) {

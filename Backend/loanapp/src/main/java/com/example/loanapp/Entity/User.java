@@ -2,6 +2,7 @@ package com.example.loanapp.Entity;
 
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.CreationTimestamp;
@@ -19,6 +20,7 @@ import java.util.List;
 @Table(name = "users",
         uniqueConstraints = @UniqueConstraint(columnNames = "email"))
 @Data
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class User implements UserDetails {
@@ -41,7 +43,7 @@ public class User implements UserDetails {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private Role role = Role.USER;
+    private Role role;
 
     private String address;
     private String city;
@@ -50,16 +52,19 @@ public class User implements UserDetails {
     private String ssnLastFour;
     private LocalDate dateOfBirth;
 
-
+    @Builder.Default
     @Column(nullable = false)
     private boolean enabled = true;
 
+    @Builder.Default
     @Column(nullable = false)
     private boolean accountNonLocked = true;
 
+    @Builder.Default
     @Column(nullable = false)
     private boolean credentialsNonExpired = true;
 
+    @Builder.Default
     @Column(nullable = false)
     private boolean accountNonExpired = true;
 
@@ -70,6 +75,7 @@ public class User implements UserDetails {
     private Double monthlyDebt;
 
     @CreationTimestamp
+    @Column(updatable = false)
     private LocalDateTime createdAt;
 
     @UpdateTimestamp
@@ -77,18 +83,16 @@ public class User implements UserDetails {
 
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL)
     private List<Loan> loans;
+
     private String passwordResetToken;
     private LocalDateTime passwordResetExpiry;
 
-    // Explicit getter for email
-    public String getEmail() {
-        return this.email;
-    }
+    // --- UserDetails Implementation ---
 
-    // Explicit getters for UserDetails interface
     @Override
-    public String getPassword() {
-        return this.password;
+    public Collection<? extends GrantedAuthority> getAuthorities() {
+
+        return List.of(new SimpleGrantedAuthority("ROLE_" + role.name()));
     }
 
     @Override
@@ -116,29 +120,11 @@ public class User implements UserDetails {
         return this.enabled;
     }
 
-    @Override
-    public Collection<? extends GrantedAuthority> getAuthorities() {
-        return List.of(new SimpleGrantedAuthority(role.name()));
-    }
-
-    // Getters and setters for reset token
-    public String getPasswordResetToken() {
-        return passwordResetToken;
-    }
-
-    public void setPasswordResetToken(String passwordResetToken) {
-        this.passwordResetToken = passwordResetToken;
-    }
-
-    public LocalDateTime getPasswordResetExpiry() {
-        return passwordResetExpiry;
-    }
-
-    public void setPasswordResetExpiry(LocalDateTime passwordResetExpiry) {
-        this.passwordResetExpiry = passwordResetExpiry;
-    }
+    // --- Enums ---
 
     public enum Role {
-        USER, ADMIN, LOAN_OFFICER
+        USER,
+        ADMIN,
+        LOAN_OFFICER
     }
 }

@@ -2,6 +2,7 @@ package com.example.loanapp.controllers;
 
 import com.example.loanapp.DTO.LoanDTO;
 import com.example.loanapp.Entity.Loan;
+import com.example.loanapp.Entity.Repayment;
 import com.example.loanapp.Entity.User;
 import com.example.loanapp.Service.LoanService;
 import jakarta.validation.Valid;
@@ -12,11 +13,10 @@ import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -44,7 +44,6 @@ public class LoanController {
         if (user.getRole() == User.Role.USER) {
             loans = loanService.getUserLoans(user.getId(), pageable);
         } else {
-            // Admin/Loan Officer can see all loans
             loans = loanService.getAllLoans(pageable);
         }
 
@@ -60,12 +59,25 @@ public class LoanController {
 
         Loan loan = loanService.getLoanById(id);
 
-        // Check authorization
         if (user.getRole() == User.Role.USER && !loan.getUser().getId().equals(user.getId())) {
             return ResponseEntity.status(403).build();
         }
 
         return ResponseEntity.ok(convertToDTO(loan));
+    }
+
+    @GetMapping("/{id}/repayments")
+    @PreAuthorize("hasAnyRole('USER', 'ADMIN', 'LOAN_OFFICER')")
+    public ResponseEntity<List<Repayment>> getRepayments(
+            @AuthenticationPrincipal User user,
+            @PathVariable String id) {
+
+        Loan loan = loanService.getLoanById(id);
+        if (user.getRole() == User.Role.USER && !loan.getUser().getId().equals(user.getId())) {
+            return ResponseEntity.status(403).build();
+        }
+
+        return ResponseEntity.ok(loanService.getRepaymentsByLoanId(id));
     }
 
     @GetMapping("/summary")
@@ -134,7 +146,6 @@ public class LoanController {
         dto.setDueDate(loan.getDueDate());
         dto.setCompletedDate(loan.getCompletedDate());
 
-        // Calculate remaining balance
         BigDecimal remaining = loan.getAmount().subtract(loan.getTotalRepaid());
         dto.setRemainingBalance(remaining.max(BigDecimal.ZERO));
 
