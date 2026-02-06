@@ -5,23 +5,39 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.lang.NonNull;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
     private final UserDetailsService userDetailsService;
+
+    /**
+     * Skip filtering for public endpoints and first admin registration
+     */
+    @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        String path = request.getServletPath();
+        return path.startsWith("/api/auth/")           // login, register
+                || path.startsWith("/api/public/")     // public endpoints
+                || path.equals("/api/admin/register")  // allow first admin registration without token
+                || path.startsWith("/v3/api-docs")    // swagger docs
+                || path.startsWith("/swagger-ui")
+                || path.equals("/favicon.ico");
+    }
 
     @Override
     protected void doFilterInternal(
@@ -30,43 +46,49 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             @NonNull FilterChain filterChain
     ) throws ServletException, IOException {
 
-        final String authHeader = request.getHeader("Authorization");
-        final String jwt;
-        final String userEmail;
+        String authHeader = request.getHeader("Authorization");
 
-        // 1. If no header or wrong format, just move to the next filter.
-        // Spring SecurityConfig will decide if the path requires auth or not.
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            // No token, skip authentication
             filterChain.doFilter(request, response);
             return;
         }
 
-        // 2. Extract JWT and Username
-        jwt = authHeader.substring(7);
-        userEmail = jwtService.extractUsername(jwt);
+        String jwt = authHeader.substring(7); // Remove "Bearer "
+        String username;
 
-        // 3. If there is a username and the user is not already authenticated
-        if (userEmail != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-            UserDetails userDetails = this.userDetailsService.loadUserByUsername(userEmail);
+        try {
+            username = jwtService.extractUsername(jwt);
+        } catch (Exception e) {
+            log.warn("Invalid JWT token: {}", e.getMessage());
+            filterChain.doFilter(request, response);
+            return;
+        }
 
-            // 4. Validate token against database/user details
-            if (jwtService.isTokenValid(jwt, userDetails)) {
-                UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
-                        userDetails,
-                        null,
-                        userDetails.getAuthorities() // These MUST include the ROLE_ prefix
-                );
+        if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
+            try {
+                UserDetails userDetails = userDetailsService.loadUserByUsername(username);
 
-                authToken.setDetails(
-                        new WebAuthenticationDetailsSource().buildDetails(request)
-                );
+                if (jwtService.isTokenValid(jwt, userDetails)) {
+                    UsernamePasswordAuthenticationToken authToken =
+                            new UsernamePasswordAuthenticationToken(
+                                    userDetails,
+                                    null,
+                                    userDetails.getAuthorities()
+                            );
 
-                // 5. Update Security Context
-                SecurityContextHolder.getContext().setAuthentication(authToken);
+                    authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+
+                    SecurityContextHolder.getContext().setAuthentication(authToken);
+                    log.info("JWT authentication successful for user: {}", username);
+                } else {
+                    log.warn("JWT token is invalid or expired for user: {}", username);
+                }
+            } catch (Exception ex) {
+                log.warn("User not found or authentication failed: {}", ex.getMessage());
             }
         }
 
-        // 6. Continue the chain
         filterChain.doFilter(request, response);
     }
 }

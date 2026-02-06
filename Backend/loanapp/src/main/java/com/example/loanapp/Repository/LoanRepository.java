@@ -30,6 +30,8 @@ public interface LoanRepository extends JpaRepository<Loan, String> {
     // --- Aggregations for UserService ---
     long countByUserId(String userId);
     long countByUserIdAndStatus(String userId, LoanStatus status);
+    long countByStatus(String status);
+
 
     @Query("SELECT SUM(l.amount) FROM Loan l WHERE l.user.id = :userId")
     BigDecimal sumAmountByUserId(@Param("userId") String userId);

@@ -24,6 +24,7 @@ public interface UserRepository extends JpaRepository<User, String> {
     long countByCreatedAtAfter(LocalDateTime date);
     long countByAnnualIncomeNotNullAndEmploymentTypeNotNull();
 
+
     Long countByCreditScoreBetween(int min, int max);
 
     @Query("SELECT AVG(u.creditScore) FROM User u WHERE u.creditScore IS NOT NULL")

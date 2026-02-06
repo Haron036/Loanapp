@@ -7,6 +7,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -26,7 +27,7 @@ import java.util.List;
 
 @Configuration
 @EnableWebSecurity
-@EnableMethodSecurity // Required to make @PreAuthorize work in your Controller
+@EnableMethodSecurity // Allows @PreAuthorize to work on Controllers
 @RequiredArgsConstructor
 public class SecurityConfig {
 
@@ -45,46 +46,37 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                // 1. CORS & CSRF
-                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+                // 1. Disable CSRF (Stateless API) & Enable CORS
                 .csrf(AbstractHttpConfigurer::disable)
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+                .cors(Customizer.withDefaults())
 
-                // 2. Request Authorization
+                // 2. Authorization Rules
                 .authorizeHttpRequests(auth -> auth
-                        // Allow Pre-flight OPTIONS requests for CORS
+                        // Publicly accessible
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                        .requestMatchers("/api/auth/**", "/error", "/v3/api-docs/**", "/swagger-ui/**").permitAll()
+                        .requestMatchers("/api/admin/register").permitAll()
 
-                        // Public API Endpoints
-                        .requestMatchers(
-                                "/api/auth/**",
-                                "/api/public/**",
-                                "/error"
-                        ).permitAll()
+                        // Analytics - Must allow ADMIN/OFFICER at the filter level
+                        .requestMatchers("/api/analytics/**").hasAnyRole("ADMIN", "LOAN_OFFICER")
 
-                        // Swagger / Documentation (if applicable)
-                        .requestMatchers(
-                                "/v3/api-docs/**",
-                                "/swagger-ui/**",
-                                "/swagger-ui.html"
-                        ).permitAll()
-
-                        // Secured API Endpoints
-                        // We permit these at the security level so that @PreAuthorize
-                        // inside LoanController can handle the specific roles.
-                        .requestMatchers("/api/loans/**").authenticated()
-                        .requestMatchers("/api/users/**").authenticated()
+                        // Admin specific paths
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
 
-                        // Catch-all
+                        // Loans & Users - Require authentication (Controller @PreAuthorize handles roles)
+                        .requestMatchers("/api/loans/**").authenticated()
+                        .requestMatchers("/api/users/**").authenticated()
+
+                        // Default fallback
                         .anyRequest().authenticated()
                 )
 
-                // 3. Stateless Sessions (JWT)
+                // 3. Stateless Session (JWT)
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
 
-                // 4. Filter Ordering
                 .authenticationProvider(authenticationProvider())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
@@ -94,21 +86,15 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-
-        // Match your React development ports
-        configuration.setAllowedOrigins(Arrays.asList(
-                "http://localhost:5173",
-                "http://localhost:3000"
-        ));
-
+        // Be specific with origins for security
+        configuration.setAllowedOrigins(List.of("http://localhost:5173", "http://localhost:3000"));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "Accept", "Origin"));
+        configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"));
         configuration.setExposedHeaders(List.of("Authorization"));
         configuration.setAllowCredentials(true);
         configuration.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        // Ensure CORS applies to the /api pathing
         source.registerCorsConfiguration("/**", configuration);
         return source;
     }

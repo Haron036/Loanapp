@@ -25,12 +25,12 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.*;
+import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
+@RequiredArgsConstructor
 public class UserService implements UserDetailsService {
 
     private final UserRepository userRepository;
@@ -42,27 +42,15 @@ public class UserService implements UserDetailsService {
     private final EmailService emailService;
     private final LoanService loanService;
 
-    // Manual constructor to handle @Lazy LoanService correctly
-    public UserService(UserRepository userRepository,
-                       LoanRepository loanRepository,
-                       RepaymentRepository repaymentRepository,
-                       AuditLogRepository auditLogRepository,
-                       PasswordEncoder passwordEncoder,
-                       CreditScoreService creditScoreService,
-                       EmailService emailService,
-                       @Lazy LoanService loanService) {
-        this.userRepository = userRepository;
-        this.loanRepository = loanRepository;
-        this.repaymentRepository = repaymentRepository;
-        this.auditLogRepository = auditLogRepository;
-        this.passwordEncoder = passwordEncoder;
-        this.creditScoreService = creditScoreService;
-        this.emailService = emailService;
-        this.loanService = loanService;
+    /**
+     * Encode a raw password (helper for controllers)
+     */
+    public String encodePassword(String rawPassword) {
+        return passwordEncoder.encode(rawPassword);
     }
 
     /**
-     * Updated to use AuthDTO.RegisterRequest to match the AuthController
+     * Register a new user (self-registration or admin registration)
      */
     @Transactional
     public User registerUser(AuthDTO.RegisterRequest request) {
@@ -84,32 +72,37 @@ public class UserService implements UserDetailsService {
         user.setEmploymentType(request.getEmploymentType());
         user.setMonthlyDebt(request.getMonthlyDebt() != null ? request.getMonthlyDebt() : 0.0);
 
-        // Default values for new users
+        // Defaults
         user.setExistingLoansCount(0);
         user.setRole(User.Role.USER);
         user.setEnabled(true);
-        user.setCreatedAt(LocalDateTime.now());
         user.setAccountNonLocked(true);
+        user.setCreatedAt(LocalDateTime.now());
 
-        // Initial credit score calculation
+        // Calculate initial credit score
         user.setCreditScore(creditScoreService.calculateCreditScore(user));
 
         User savedUser = userRepository.save(user);
 
-        // Post-registration actions
+        // Send welcome email (do not rollback on failure)
         try {
             emailService.sendWelcomeEmail(savedUser);
         } catch (Exception e) {
-            // Log email failure but don't roll back registration
             System.err.println("Failed to send welcome email: " + e.getMessage());
         }
 
-        saveAuditLog("REGISTER", "USER", savedUser.getId(), savedUser.getId(), "User self-registered via Auth portal", "0.0.0.0");
+        // Audit log
+        saveAuditLog("REGISTER", "USER", savedUser.getId(), savedUser.getId(), "User self-registered", "0.0.0.0");
 
         return savedUser;
     }
 
     /* ================= GETTERS & AUTH ================= */
+
+    public User getUserById(String userId) {
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + userId));
+    }
 
     public User getUserEntityByEmail(String email) {
         return userRepository.findByEmail(email)
@@ -117,19 +110,28 @@ public class UserService implements UserDetailsService {
     }
 
     @Override
-    @Transactional
     public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
         User user = getUserEntityByEmail(email);
         return org.springframework.security.core.userdetails.User.builder()
                 .username(user.getEmail())
                 .password(user.getPassword())
-                .authorities(user.getRole().name()) // Roles are usually stored as Authorities
+                .authorities(user.getRole().name())
                 .disabled(!user.isEnabled())
                 .accountLocked(!user.isAccountNonLocked())
                 .build();
     }
 
-    /* ================= PROFILE & STATS ================= */
+    /* ================= PASSWORD & PROFILE ================= */
+
+    @Transactional
+    public void changePassword(String userId, UserDTO.ChangePasswordRequest request) {
+        User user = getUserById(userId);
+        if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPassword())) {
+            throw new ValidationException("Current password incorrect");
+        }
+        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        userRepository.save(user);
+    }
 
     public UserDTO.ProfileResponse getUserProfile(String userId) {
         User user = getUserById(userId);
@@ -144,19 +146,7 @@ public class UserService implements UserDetailsService {
         return UserDTO.convertToProfileResponse(user, loanSummary, activities);
     }
 
-    public UserDTO.Response getUserResponseByEmail(String email) {
-        return UserDTO.convertToResponse(getUserEntityByEmail(email));
-    }
-
-    @Transactional
-    public void changePassword(String userId, UserDTO.ChangePasswordRequest request) {
-        User user = getUserById(userId);
-        if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPassword())) {
-            throw new ValidationException("Current password incorrect");
-        }
-        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
-        userRepository.save(user);
-    }
+    /* ================= ADMIN HELPERS ================= */
 
     public UserDTO.AdminResponse getUserForAdmin(String userId) {
         User user = getUserById(userId);
@@ -194,16 +184,13 @@ public class UserService implements UserDetailsService {
 
         long totalRepayments = repaymentRepository.countByLoan_User_Id(userId);
         long onTime = repaymentRepository.countByUserIdAndPaidOnTime(userId);
-        stats.setOnTimeRepaymentRate(totalRepayments > 0 ? BigDecimal.valueOf((onTime * 100.0) / totalRepayments) : BigDecimal.ZERO);
+        stats.setOnTimeRepaymentRate(totalRepayments > 0 ?
+                BigDecimal.valueOf((onTime * 100.0) / totalRepayments) : BigDecimal.ZERO);
 
         return stats;
     }
 
-    /* ================= UTILS ================= */
-
-    public User getUserById(String id) {
-        return userRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + id));
-    }
+    /* ================= UTILITIES ================= */
 
     private void saveAuditLog(String action, String type, String entityId, String userId, String details, String ip) {
         AuditLog log = new AuditLog();

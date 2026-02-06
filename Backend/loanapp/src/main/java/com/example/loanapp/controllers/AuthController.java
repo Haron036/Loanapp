@@ -17,9 +17,9 @@ import org.springframework.web.bind.annotation.*;
 import java.util.HashMap;
 import java.util.Map;
 
-@Slf4j // Enables log.info for easier debugging
+@Slf4j
 @RestController
-@RequestMapping("/auth")
+@RequestMapping("/api/auth")
 @RequiredArgsConstructor
 public class AuthController {
 
@@ -29,35 +29,36 @@ public class AuthController {
 
     @PostMapping("/login")
     public ResponseEntity<AuthDTO.AuthResponse> login(@Valid @RequestBody AuthDTO.LoginRequest request) {
-        log.info("Login attempt for email: {}", request.getEmail());
+        log.info("Login attempt: {}", request.getEmail());
 
+        // 1. Authenticate credentials
         Authentication authentication = authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword())
         );
 
+        // 2. Load UserDetails and Entity
         UserDetails userDetails = (UserDetails) authentication.getPrincipal();
         User user = userService.getUserEntityByEmail(userDetails.getUsername());
 
+        // 3. Generate tokens using the rewritten JwtService (Now with roles!)
         String jwt = jwtService.generateToken(userDetails);
         String refreshToken = jwtService.generateRefreshToken(userDetails);
 
+        log.info("User {} logged in successfully with role: {}", user.getEmail(), user.getRole());
         return ResponseEntity.ok(mapToAuthResponse(user, jwt, refreshToken));
     }
 
     @PostMapping("/register")
     public ResponseEntity<AuthDTO.AuthResponse> register(@Valid @RequestBody AuthDTO.RegisterRequest request) {
-        log.info("Received registration request for: {}", request.getEmail());
+        log.info("Registration request: {}", request.getEmail());
 
-        // 1. Register the user via service
-        // Make sure your UserService.registerUser accepts AuthDTO.RegisterRequest
+        // 1. Register user
         User user = userService.registerUser(request);
 
-        // 2. Generate tokens
-        // Since User entity implements UserDetails, we pass 'user' directly
+        // 2. Generate tokens (User implements UserDetails)
         String jwt = jwtService.generateToken(user);
         String refreshToken = jwtService.generateRefreshToken(user);
 
-        log.info("Registration successful for user ID: {}", user.getId());
         return ResponseEntity.ok(mapToAuthResponse(user, jwt, refreshToken));
     }
 
@@ -69,6 +70,7 @@ public class AuthController {
             UserDetails userDetails = userService.loadUserByUsername(username);
 
             if (jwtService.isTokenValid(request.getRefreshToken(), userDetails)) {
+                // Generate a fresh Access Token with roles
                 String newAccessToken = jwtService.generateToken(userDetails);
 
                 Map<String, String> response = new HashMap<>();
@@ -83,14 +85,14 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<Void> logout(@RequestHeader(value = "Authorization", required = false) String token) {
-        // JWT is stateless, so we just return 200.
-        // The client handles logout by clearing the token from localStorage.
+    public ResponseEntity<Void> logout() {
+        // Stateless logout - handled by frontend clearing localStorage
         return ResponseEntity.ok().build();
     }
 
     /**
-     * Map User entity and tokens to the AuthResponse DTO
+     * Maps the database entity and generated tokens to the DTO.
+     * Ensure AuthDTO.AuthResponse has these fields.
      */
     private AuthDTO.AuthResponse mapToAuthResponse(User user, String token, String refreshToken) {
         AuthDTO.AuthResponse response = new AuthDTO.AuthResponse();
@@ -99,8 +101,12 @@ public class AuthController {
         response.setUserId(user.getId());
         response.setEmail(user.getEmail());
         response.setName(user.getName());
+
+        // Return raw role name (ADMIN) for frontend logic
         response.setRole(user.getRole().name());
-        response.setExpiresIn(jwtService.getExpirationTime());
+
+
+
         return response;
     }
 }
