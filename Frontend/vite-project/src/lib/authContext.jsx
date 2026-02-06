@@ -20,55 +20,46 @@ export function AuthProvider({ children }) {
 
   /* ================= LOGIN ================= */
   const login = useCallback(async (email, password) => {
-    try {
-      const response = await authApi.login({ email, password });
-      // Destructure fields based on your AuthResponse DTO
-      const { token, refreshToken, name, userId, email: userEmail, roles } = response.data;
-      
-      const userData = { id: userId, name, email: userEmail, roles };
-      
-      localStorage.setItem('token', token);
-      localStorage.setItem('refreshToken', refreshToken);
-      localStorage.setItem('lendwise_user', JSON.stringify(userData));
-      
-      setUser(userData);
-      return { success: true };
-    } catch (error) {
-      console.error('Login error:', error);
-      return { 
-        success: false, 
-        error: error.response?.data?.message || 'Invalid email or password' 
-      };
-    }
-  }, []);
+  try {
+    const response = await authApi.login({ email, password });
+    const { token, refreshToken, name, userId, email: userEmail, role } = response.data;
 
-  /* ================= REGISTER ================= */
-  // FIXED: Now accepts a single object (registrationData) 
-  // This prevents the nested object START_OBJECT error in Java
-  const register = useCallback(async (registrationData) => {
-    try {
-      const response = await authApi.register(registrationData);
-      
-      // Destructure the response from your backend AuthResponse
-      const { token, refreshToken, name, userId, email, roles } = response.data;
-      
-      const userData = { id: userId, name, email, roles };
-      
-      localStorage.setItem('token', token);
-      localStorage.setItem('refreshToken', refreshToken);
-      localStorage.setItem('lendwise_user', JSON.stringify(userData));
-      
-      setUser(userData);
-      return { success: true };
-    } catch (error) {
-      console.error('Registration error:', error);
-      return { 
-        success: false, 
-        message: error.response?.data?.message || 'Registration failed.',
-        details: error.response?.data?.details // Includes Spring Validation errors
-      };
-    }
-  }, []);
+    const userData = { id: userId, name, email: userEmail, role }; // singular 'role'
+
+    localStorage.setItem('token', token);
+    localStorage.setItem('refreshToken', refreshToken);
+    localStorage.setItem('lendwise_user', JSON.stringify(userData));
+
+    setUser(userData);
+    return { success: true };
+  } catch (error) {
+    console.error('Login error:', error);
+    return { success: false, error: error.response?.data?.message || 'Invalid email or password' };
+  }
+}, []);
+
+const register = useCallback(async (registrationData) => {
+  try {
+    const response = await authApi.register(registrationData);
+    const { token, refreshToken, name, userId, email, role } = response.data;
+
+    const userData = { id: userId, name, email, role }; // singular 'role'
+
+    localStorage.setItem('token', token);
+    localStorage.setItem('refreshToken', refreshToken);
+    localStorage.setItem('lendwise_user', JSON.stringify(userData));
+
+    setUser(userData);
+    return { success: true };
+  } catch (error) {
+    console.error('Registration error:', error);
+    return { 
+      success: false, 
+      message: error.response?.data?.message || 'Registration failed.',
+      details: error.response?.data?.details
+    };
+  }
+}, []);
 
   /* ================= LOGOUT ================= */
   const logout = useCallback(async () => {

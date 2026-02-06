@@ -12,6 +12,7 @@ import Apply from "./pages/Apply";
 import Loans from "./pages/Loans";
 import About from "./pages/About";
 import NotFound from "./pages/NotFound";
+import AdminRegister from '@/pages/AdminRegister';
 
 const queryClient = new QueryClient();
 
@@ -30,6 +31,7 @@ const App = () => (
             <Route path="/apply" element={<Apply />} />
             <Route path="/loans" element={<Loans />} />
             <Route path="/about" element={<About />} />
+            <Route path="/admin/register" element={<AdminRegister />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

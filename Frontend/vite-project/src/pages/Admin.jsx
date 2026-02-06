@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/authContext';
 import { Navbar } from '@/components/Navbar';
@@ -16,327 +16,271 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { 
-  adminApi,
-  loanApi,
-  formatCurrency, 
-  formatDate,
-  getCreditScoreCategory
-} from '../lib/api.js';
-import { 
-  Users, 
-  DollarSign, 
-  TrendingUp, 
-  Clock, 
-  CheckCircle,
-  XCircle,
-  Eye,
-  BarChart3
-} from 'lucide-react';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { adminApi, loanApi, formatCurrency, formatDate, getCreditScoreCategory } from '@/lib/api';
+import { Users, DollarSign, TrendingUp, Clock, CheckCircle, XCircle, Eye, AlertCircle, RefreshCw } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 
 const statusColors = {
-  pending: 'bg-warning/10 text-warning border-warning/20',
-  approved: 'bg-success/10 text-success border-success/20',
-  rejected: 'bg-destructive/10 text-destructive border-destructive/20',
-  disbursed: 'bg-secondary/10 text-secondary border-secondary/20',
-  repaying: 'bg-secondary/10 text-secondary border-secondary/20',
-  completed: 'bg-muted text-muted-foreground border-muted',
+  PENDING: 'bg-yellow-100 text-yellow-700 border-yellow-200',
+  APPROVED: 'bg-green-100 text-green-700 border-green-200',
+  REJECTED: 'bg-red-100 text-red-700 border-red-200',
+  DISBURSED: 'bg-blue-100 text-blue-700 border-blue-200',
+  COMPLETED: 'bg-slate-100 text-slate-700 border-slate-200',
 };
 
-const CHART_COLORS = ['#10B981', '#EF4444', '#F59E0B'];
+const CHART_COLORS = ['#10B981', '#3B82F6', '#F59E0B', '#EF4444', '#8B5CF6'];
 
 export default function Admin() {
   const { user, isAuthenticated } = useAuth();
   const navigate = useNavigate();
-  const [selectedLoan, setSelectedLoan] = useState(null);
+
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [loans, setLoans] = useState([]);
   const [analytics, setAnalytics] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [selectedLoan, setSelectedLoan] = useState(null);
+  const [error, setError] = useState(null);
+
+  // Use useCallback to prevent unnecessary re-renders
+  const fetchAdminData = useCallback(async (isRefresh = false) => {
+    try {
+      isRefresh ? setRefreshing(true) : setLoading(true);
+      setError(null);
+      
+      const [loansResponse, analyticsResponse] = await Promise.all([
+        adminApi.getAllLoans(0, 50),
+        adminApi.getAnalytics()
+      ]);
+
+      // Spring Page object fix: data.content
+      setLoans(loansResponse.data.content || []);
+      setAnalytics(analyticsResponse.data);
+    } catch (err) {
+      console.error('Fetch error:', err);
+      setError(err.response?.status === 403 
+        ? 'Access Denied: You do not have administrator privileges.' 
+        : 'Failed to sync with server. Please try again.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated) {
       navigate('/auth');
-    } else if (user?.role !== 'admin') {
+      return;
+    }
+    // Check for ROLE_ prefix if your context includes it, or use .includes()
+    const isAdmin = user?.role?.toUpperCase().includes('ADMIN');
+    if (user && !isAdmin) {
       navigate('/dashboard');
-    } else {
-      fetchAdminData();
+      return;
     }
-  }, [isAuthenticated, user, navigate]);
+    fetchAdminData();
+  }, [isAuthenticated, user, navigate, fetchAdminData]);
 
-  const fetchAdminData = async () => {
+  const handleAction = async (loanId, action, note) => {
     try {
-      setLoading(true);
-      const [loansResponse, analyticsResponse] = await Promise.all([
-        adminApi.getAllLoans(),
-        adminApi.getAnalytics()
-      ]);
-      setLoans(loansResponse.data);
-      setAnalytics(analyticsResponse.data);
-    } catch (error) {
-      console.error('Error fetching admin data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (!user || user.role !== 'admin') return null;
-
-  const pendingLoans = loans.filter(l => l.status === 'pending');
-
-  const handleApprove = async (loanId) => {
-    try {
-      await loanApi.approve(loanId, 'Approved by admin');
-      // Refresh data
-      fetchAdminData();
+      if (action === 'approve') {
+        await loanApi.approve(loanId, note);
+      } else {
+        await loanApi.reject(loanId, note);
+      }
       setSelectedLoan(null);
-    } catch (error) {
-      console.error('Error approving loan:', error);
-    }
-  };
-
-  const handleReject = async (loanId) => {
-    try {
-      await loanApi.reject(loanId, 'Rejected by admin');
-      // Refresh data
-      fetchAdminData();
-      setSelectedLoan(null);
-    } catch (error) {
-      console.error('Error rejecting loan:', error);
+      fetchAdminData(true); 
+    } catch (err) {
+      setError(`Failed to ${action} loan. Please check console.`);
     }
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
-          <p className="mt-4 text-muted-foreground">Loading admin data...</p>
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="flex flex-col items-center gap-4">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+          <p className="text-sm font-medium text-slate-500">Initializing Admin Panel...</p>
         </div>
       </div>
     );
   }
 
+  const pendingLoans = loans.filter(l => l.status === 'PENDING');
+
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-slate-50/50">
       <Navbar />
-      
+
       <main className="container mx-auto px-4 pt-24 pb-12">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold">Admin Dashboard</h1>
-          <p className="text-muted-foreground">Manage loan applications and view analytics.</p>
+        <div className="flex justify-between items-end mb-8">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight text-slate-900">Admin Dashboard</h1>
+            <p className="text-muted-foreground">Comprehensive system oversight and loan lifecycle management.</p>
+          </div>
+          <Button 
+            onClick={() => fetchAdminData(true)} 
+            variant="outline" 
+            size="sm" 
+            disabled={refreshing}
+            className="bg-white"
+          >
+            <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+            Sync Data
+          </Button>
         </div>
 
+        {error && (
+          <Card className="border-red-200 bg-red-50 mb-6">
+            <CardContent className="pt-4 flex items-center gap-3 text-red-800">
+              <AlertCircle className="h-5 w-5" />
+              <p className="text-sm font-medium">{error}</p>
+            </CardContent>
+          </Card>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <StatCard
-            title="Total Applications"
-            value={analytics?.totalApplications || 0}
-            icon={Users}
-            trend={{ value: 12, positive: true }}
+          <StatCard 
+            title="Total Portfolio" 
+            value={formatCurrency(analytics?.totalLoanAmount || 0)} 
+            icon={DollarSign} 
+            loading={refreshing}
           />
-          <StatCard
-            title="Total Disbursed"
-            value={formatCurrency(analytics?.totalDisbursed || 0)}
-            icon={DollarSign}
-            variant="accent"
+          <StatCard 
+            title="Active Borrowers" 
+            value={analytics?.activeUsers || 0} 
+            icon={Users} 
+            variant="accent" 
+            loading={refreshing}
           />
-          <StatCard
-            title="Avg Credit Score"
-            value={analytics?.averageCreditScore || 0}
-            icon={TrendingUp}
-            variant="success"
+          <StatCard 
+            title="Avg Interest Rate" 
+            value={`${analytics?.averageInterestRate || 0}%`} 
+            icon={TrendingUp} 
+            variant="success" 
+            loading={refreshing}
           />
-          <StatCard
-            title="Pending Review"
-            value={pendingLoans.length}
-            icon={Clock}
-            variant={pendingLoans.length > 0 ? 'warning' : 'default'}
+          <StatCard 
+            title="Awaiting Review" 
+            value={pendingLoans.length} 
+            icon={Clock} 
+            variant={pendingLoans.length > 0 ? 'warning' : 'default'} 
+            loading={refreshing}
           />
         </div>
 
         <Tabs defaultValue="applications" className="space-y-6">
-          <TabsList>
+          <TabsList className="bg-white border p-1 shadow-sm">
             <TabsTrigger value="applications">Applications</TabsTrigger>
-            <TabsTrigger value="analytics">Analytics</TabsTrigger>
+            <TabsTrigger value="analytics">Visual Analytics</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="applications" className="space-y-6">
-            {pendingLoans.length > 0 && (
-              <Card className="border-warning/30 bg-warning/5">
-                <CardContent className="pt-6">
-                  <div className="flex items-center gap-4">
-                    <div className="p-3 rounded-lg bg-warning/10 text-warning">
-                      <Clock className="h-6 w-6" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold">Pending Applications</h3>
-                      <p className="text-sm text-muted-foreground">
-                        You have {pendingLoans.length} application(s) awaiting review.
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            <Card>
-              <CardHeader>
-                <CardTitle>All Applications</CardTitle>
-                <CardDescription>Review and manage loan applications</CardDescription>
+          <TabsContent value="applications" className="mt-0">
+            <Card className="shadow-sm border-slate-200">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg">Loan Pipeline</CardTitle>
+                <CardDescription>Review and manage all incoming and historical loan requests.</CardDescription>
               </CardHeader>
               <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>ID</TableHead>
-                      <TableHead>Applicant</TableHead>
-                      <TableHead>Amount</TableHead>
-                      <TableHead>Purpose</TableHead>
-                      <TableHead>Credit Score</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {loans.map((loan) => {
-                      const scoreCategory = getCreditScoreCategory(loan.creditScore);
-                      return (
-                        <TableRow key={loan.id}>
-                          <TableCell className="font-mono text-sm">{loan.id}</TableCell>
-                          <TableCell className="font-medium">{loan.userName || loan.user?.name || 'N/A'}</TableCell>
-                          <TableCell>{formatCurrency(loan.amount)}</TableCell>
-                          <TableCell>{loan.purpose}</TableCell>
-                          <TableCell>
-                            <span className={scoreCategory.color}>
-                              {loan.creditScore} ({scoreCategory.label})
-                            </span>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className={statusColors[loan.status]}>
-                              {loan.status.charAt(0).toUpperCase() + loan.status.slice(1)}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>{formatDate(loan.appliedAt || loan.createdAt)}</TableCell>
-                          <TableCell className="text-right">
-                            <Button 
-                              variant="ghost" 
-                              size="sm"
-                              onClick={() => setSelectedLoan(loan)}
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
+                <div className="rounded-md border bg-white">
+                  <Table>
+                    <TableHeader className="bg-slate-50/50">
+                      <TableRow>
+                        <TableHead>Applicant</TableHead>
+                        <TableHead>Amount</TableHead>
+                        <TableHead>Risk Profile</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Submitted</TableHead>
+                        <TableHead className="text-right">Action</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {loans.length > 0 ? (
+                        loans.map(loan => {
+                          const score = getCreditScoreCategory(loan.creditScore);
+                          return (
+                            <TableRow key={loan.id} className="hover:bg-slate-50/50 transition-colors">
+                              <TableCell className="font-semibold text-slate-700">{loan.userName || 'Anonymous'}</TableCell>
+                              <TableCell>{formatCurrency(loan.amount)}</TableCell>
+                              <TableCell>
+                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full bg-slate-100 ${score.color}`}>
+                                  {loan.creditScore} • {score.label}
+                                </span>
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className={`${statusColors[loan.status]} font-bold`}>
+                                  {loan.status}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-slate-500">{formatDate(loan.appliedDate)}</TableCell>
+                              <TableCell className="text-right">
+                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSelectedLoan(loan)}>
+                                  <Eye className="h-4 w-4" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })
+                      ) : (
+                        <TableRow>
+                          <TableCell colSpan={6} className="h-24 text-center text-slate-500">
+                            No loan applications found in the system.
                           </TableCell>
                         </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
 
-          <TabsContent value="analytics" className="space-y-6">
-            <div className="grid lg:grid-cols-2 gap-6">
-              <Card>
+          <TabsContent value="analytics" className="mt-0">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Card className="shadow-sm">
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <BarChart3 className="h-5 w-5" />
-                    Monthly Applications
-                  </CardTitle>
+                  <CardTitle className="text-base">Status Distribution</CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={analytics?.monthlyApplications || []}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                      <XAxis dataKey="month" className="text-xs" />
-                      <YAxis className="text-xs" />
-                      <Tooltip 
-                        contentStyle={{ 
-                          backgroundColor: 'hsl(var(--card))',
-                          border: '1px solid hsl(var(--border))',
-                          borderRadius: '8px'
-                        }}
-                      />
-                      <Bar 
-                        dataKey="count" 
-                        fill="hsl(var(--secondary))" 
-                        radius={[4, 4, 0, 0]}
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Loan Status Distribution</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ResponsiveContainer width="100%" height={300}>
+                <CardContent className="h-[350px]">
+                  <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
-                        data={analytics?.loansByStatus || []}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
+                        data={analytics?.statusDistribution || []}
+                        dataKey="count"
+                        nameKey="status"
+                        innerRadius={80}
                         outerRadius={100}
                         paddingAngle={5}
-                        dataKey="count"
-                        label={({ status, count }) => `${status}: ${count}`}
                       >
-                        {(analytics?.loansByStatus || []).map((entry, index) => (
-                          <Cell 
-                            key={`cell-${index}`} 
-                            fill={CHART_COLORS[index % CHART_COLORS.length]} 
-                          />
+                        {analytics?.statusDistribution?.map((_, index) => (
+                          <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} strokeWidth={0} />
                         ))}
                       </Pie>
                       <Tooltip />
+                      <Legend verticalAlign="bottom" height={36}/>
                     </PieChart>
                   </ResponsiveContainer>
                 </CardContent>
               </Card>
 
-              <Card className="lg:col-span-2">
+              <Card className="shadow-sm">
                 <CardHeader>
-                  <CardTitle>Key Performance Metrics</CardTitle>
+                  <CardTitle className="text-base">Volume Trends</CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                    <div className="text-center p-4 rounded-lg bg-muted/50">
-                      <p className="text-3xl font-bold text-success">
-                        {analytics ? Math.round((analytics.approvedLoans / analytics.totalApplications) * 100) : 0}%
-                      </p>
-                      <p className="text-sm text-muted-foreground">Approval Rate</p>
-                    </div>
-                    <div className="text-center p-4 rounded-lg bg-muted/50">
-                      <p className="text-3xl font-bold text-secondary">
-                        {formatCurrency(analytics?.avgLoanSize || 0)}
-                      </p>
-                      <p className="text-sm text-muted-foreground">Avg Loan Size</p>
-                    </div>
-                    <div className="text-center p-4 rounded-lg bg-muted/50">
-                      <p className="text-3xl font-bold">
-                        {analytics ? Math.round((analytics.totalRepaid / analytics.totalDisbursed) * 100) : 0}%
-                      </p>
-                      <p className="text-sm text-muted-foreground">Collection Rate</p>
-                    </div>
-                    <div className="text-center p-4 rounded-lg bg-muted/50">
-                      <p className="text-3xl font-bold text-warning">
-                        {analytics?.pendingLoans || 0}
-                      </p>
-                      <p className="text-sm text-muted-foreground">Pending Review</p>
-                    </div>
-                  </div>
+                <CardContent className="h-[350px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={analytics?.monthlyTrends || []}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                      <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{fontSize: 12}} />
+                      <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12}} />
+                      <Tooltip 
+                        cursor={{fill: '#f8fafc'}}
+                        contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)'}}
+                        formatter={(value) => formatCurrency(value)} 
+                      />
+                      <Bar dataKey="amount" fill="#3B82F6" radius={[6, 6, 0, 0]} barSize={40} />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </CardContent>
               </Card>
             </div>
@@ -344,79 +288,54 @@ export default function Admin() {
         </Tabs>
       </main>
 
+      {/* Loan Review Modal */}
       <Dialog open={!!selectedLoan} onOpenChange={() => setSelectedLoan(null)}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Review Application</DialogTitle>
-            <DialogDescription>
-              Loan #{selectedLoan?.id} - {selectedLoan?.userName || selectedLoan?.user?.name}
-            </DialogDescription>
+            <DialogTitle>Application Review</DialogTitle>
+            <DialogDescription>Reference ID: {selectedLoan?.id}</DialogDescription>
           </DialogHeader>
+          
           {selectedLoan && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-4 py-2">
+              <div className="grid grid-cols-2 gap-4 text-sm p-4 bg-slate-50 rounded-lg border">
                 <div>
-                  <p className="text-sm text-muted-foreground">Amount Requested</p>
-                  <p className="font-semibold text-lg">{formatCurrency(selectedLoan.amount)}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Proposed Rate</p>
-                  <p className="font-semibold text-lg">{selectedLoan.interestRate}%</p>
+                  <p className="text-slate-500 text-xs font-semibold uppercase">Applicant</p>
+                  <p className="font-bold text-slate-900">{selectedLoan.userName}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">Term</p>
-                  <p className="font-semibold">{selectedLoan.term} months</p>
+                  <p className="text-slate-500 text-xs font-semibold uppercase">Amount</p>
+                  <p className="font-bold text-slate-900">{formatCurrency(selectedLoan.amount)}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">Purpose</p>
-                  <p className="font-semibold">{selectedLoan.purpose}</p>
+                  <p className="text-slate-500 text-xs font-semibold uppercase">Purpose</p>
+                  <p className="font-medium capitalize">{selectedLoan.purpose.toLowerCase().replace('_', ' ')}</p>
                 </div>
-              </div>
-
-              <div className="p-4 rounded-lg bg-muted/50">
-                <p className="text-sm text-muted-foreground mb-2">Credit Assessment</p>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-2xl font-bold">{selectedLoan.creditScore}</p>
-                    <p className={`text-sm ${getCreditScoreCategory(selectedLoan.creditScore).color}`}>
-                      {getCreditScoreCategory(selectedLoan.creditScore).label}
-                    </p>
-                  </div>
-                  <Badge variant={selectedLoan.creditScore >= 650 ? 'default' : 'destructive'}>
-                    {selectedLoan.creditScore >= 650 ? 'Eligible' : 'High Risk'}
-                  </Badge>
+                <div>
+                  <p className="text-slate-500 text-xs font-semibold uppercase">Duration</p>
+                  <p className="font-medium">{selectedLoan.termMonths} Months</p>
                 </div>
-              </div>
-
-              <div>
-                <p className="text-sm text-muted-foreground">Monthly Payment</p>
-                <p className="font-semibold text-secondary text-lg">
-                  {formatCurrency(selectedLoan.monthlyPayment)}
-                </p>
               </div>
             </div>
           )}
-          {selectedLoan?.status === 'pending' && (
-            <DialogFooter className="gap-2">
-              <Button 
-                variant="destructive" 
-                onClick={() => handleReject(selectedLoan.id)}
-              >
-                <XCircle className="mr-2 h-4 w-4" />
-                Reject
-              </Button>
-              <Button 
-                variant="success"
-                onClick={() => handleApprove(selectedLoan.id)}
-              >
-                <CheckCircle className="mr-2 h-4 w-4" />
-                Approve
-              </Button>
-            </DialogFooter>
-          )}
+
+          <DialogFooter className="flex-row gap-2">
+            {selectedLoan?.status === 'PENDING' ? (
+              <>
+                <Button variant="outline" className="flex-1 border-red-200 text-red-600 hover:bg-red-50" onClick={() => handleAction(selectedLoan.id, 'reject', 'Internal risk assessment')}>
+                  <XCircle className="mr-2 h-4 w-4" /> Reject
+                </Button>
+                <Button className="flex-1 bg-green-600 hover:bg-green-700" onClick={() => handleAction(selectedLoan.id, 'approve', 'Credit check passed')}>
+                  <CheckCircle className="mr-2 h-4 w-4" /> Approve
+                </Button>
+              </>
+            ) : (
+              <Button variant="secondary" className="w-full" onClick={() => setSelectedLoan(null)}>Dismiss</Button>
+            )}
+          </DialogFooter>
         </DialogContent>
       </Dialog>
-
+      
       <Footer />
     </div>
   );

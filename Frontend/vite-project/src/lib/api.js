@@ -9,101 +9,78 @@ const api = axios.create({
   },
 });
 
-// Request Interceptor: Attach JWT Token
+// --- INTERCEPTORS (Auth Logic) ---
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
+    if (token) config.headers.Authorization = `Bearer ${token}`;
     return config;
   },
   (error) => Promise.reject(error)
 );
 
-// Response Interceptor: Handle Token Refresh and 401s
-api.interceptors.response.use(
-  (response) => response,
-  async (error) => {
-    const originalRequest = error.config;
-    if (error.response?.status === 401 && !originalRequest._retry) {
-      originalRequest._retry = true;
-      try {
-        const refreshToken = localStorage.getItem('refreshToken');
-        if (!refreshToken) throw new Error("No refresh token");
-        
-        const response = await axios.post(`${API_BASE_URL}/auth/refresh`, { refreshToken });
-        const { token } = response.data;
-        
-        localStorage.setItem('token', token);
-        originalRequest.headers.Authorization = `Bearer ${token}`;
-        return api(originalRequest);
-      } catch (refreshError) {
-        localStorage.clear();
-        window.location.href = '/auth';
-        return Promise.reject(refreshError);
-      }
-    }
-    return Promise.reject(error);
-  }
-);
+// --- API MODULES ---
+
+export const authApi = {
+  login: (credentials) => api.post('/auth/login', credentials),
+  register: (userData) => api.post('/auth/register', userData),
+  logout: () => {
+    localStorage.clear();
+    return api.post('/auth/logout');
+  },
+};
+
+export const adminApi = {
+  getAnalytics: (startDate, endDate) => api.get('/analytics/dashboard', { 
+    params: { startDate, endDate } 
+  }),
+  getAllLoans: (page = 0, size = 20) => api.get('/loans', {
+    params: { page, size }
+  }), 
+  getAllUsers: () => api.get('/admin/dashboard/users'),
+  getUser: (id) => api.get(`/admin/dashboard/users/${id}`),
+};
+
+export const loanApi = {
+  getAll: () => api.get('/loans'),
+  getById: (id) => api.get(`/loans/${id}`),
+  getSummary: () => api.get('/loans/summary'),
+  getRepayments: (id) => api.get(`/loans/${id}/repayments`), // Added for Dashboard.jsx
+  create: (loanData) => api.post('/loans', loanData),
+  
+  // Admin Actions
+  approve: (id, notes) => api.put(`/loans/${id}/approve`, { notes }),
+  reject: (id, reason) => api.put(`/loans/${id}/reject`, { reason }),
+  disburse: (id) => api.put(`/loans/${id}/disburse`),
+};
 
 /**
- * UTILITY FUNCTIONS
+ * User Specific Endpoints 
+ * This fixes the "does not provide an export named 'userApi'" error
  */
-export function formatCurrency(amount, currency = 'USD') {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount || 0);
+export const userApi = {
+  getProfile: () => api.get('/users/me'),
+  updateProfile: (data) => api.put('/users/me', data),
+};
+
+// --- UTILITIES ---
+
+export function formatCurrency(amount) {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount || 0);
 }
 
 export function formatDate(dateString) {
   if (!dateString) return 'N/A';
   return new Intl.DateTimeFormat('en-US', { 
-    year: 'numeric', 
-    month: 'short', 
-    day: 'numeric' 
+    year: 'numeric', month: 'short', day: 'numeric' 
   }).format(new Date(dateString));
 }
 
 export function getCreditScoreCategory(score) {
-  if (score >= 800) return { label: 'Excellent', color: 'text-green-600', description: 'Exceptional' };
-  if (score >= 740) return { label: 'Very Good', color: 'text-green-500', description: 'Strong' };
-  if (score >= 670) return { label: 'Good', color: 'text-blue-500', description: 'Average' };
-  if (score >= 580) return { label: 'Fair', color: 'text-yellow-500', description: 'Below average' };
-  return { label: 'Poor', color: 'text-red-500', description: 'Poor credit' };
+  if (score >= 740) return { label: 'Excellent', color: 'text-green-600' };
+  if (score >= 670) return { label: 'Good', color: 'text-blue-500' };
+  if (score >= 580) return { label: 'Fair', color: 'text-yellow-500' };
+  return { label: 'Poor', color: 'text-red-500' };
 }
-
-/**
- * API MODULES
- */
-
-// Auth Endpoints
-export const authApi = {
-  login: (credentials) => api.post('/auth/login', credentials),
-  register: (userData) => api.post('/auth/register', userData),
-  logout: () => api.post('/auth/logout'),
-};
-
-// Loan Endpoints (User perspective)
-export const loanApi = {
-  getAll: () => api.get('/loans'),
-  getById: (id) => api.get(`/loans/${id}`),
-  getSummary: () => api.get('/loans/summary'),
-  getRepayments: (loanId) => api.get(`/loans/${loanId}/repayments`),
-  create: (loanData) => api.post('/loans', loanData),
-  // These are often called from Admin context as well
-  approve: (id, note) => api.put(`/admin/loans/${id}/approve`, { note }),
-  reject: (id, note) => api.put(`/admin/loans/${id}/reject`, { note }),
-};
-
-// User Endpoints
-export const userApi = {
-  getProfile: () => api.get('/users/me'),
-};
-
-// Admin Endpoints (REQUIRED for Admin.jsx)
-export const adminApi = {
-  getAllLoans: () => api.get('/admin/loans'),
-  getAnalytics: () => api.get('/admin/analytics'),
-};
 
 export default api;
