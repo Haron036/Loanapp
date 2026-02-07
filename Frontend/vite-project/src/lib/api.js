@@ -1,15 +1,12 @@
 import axios from 'axios';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
-
 const api = axios.create({
-  baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  baseURL: 'http://localhost:8080/api', // No trailing slash
+  headers: { 'Content-Type': 'application/json' },
 });
+// --- INTERCEPTORS ---
 
-// --- INTERCEPTORS (Auth Logic) ---
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
@@ -19,8 +16,25 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// --- API MODULES ---
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    // Standard session expiry handling
+    if (error.response?.status === 401) {
+      localStorage.clear();
+      if (window.location.pathname !== '/auth') {
+        window.location.href = '/auth';
+      }
+    }
+    return Promise.reject(error);
+  }
+);
 
+// --- API MODULES (Named Exports) ---
+
+/**
+ * Auth operations for standard users
+ */
 export const authApi = {
   login: (credentials) => api.post('/auth/login', credentials),
   register: (userData) => api.post('/auth/register', userData),
@@ -30,53 +44,74 @@ export const authApi = {
   },
 };
 
+/**
+ * Management and Analytics operations
+ */
 export const adminApi = {
-  getAnalytics: (startDate, endDate) => api.get('/analytics/dashboard', { 
-    params: { startDate, endDate } 
+  // NEW: Handles the special Bootstrap/Admin-only registration
+  registerAdmin: (adminData) => api.post('/admin/register', adminData),
+  
+  // Analytics endpoints
+  getDashboardAnalytics: (start, end) => api.get('/analytics/dashboard', { 
+    params: { start, end } 
   }),
-  getAllLoans: (page = 0, size = 20) => api.get('/loans', {
-    params: { page, size }
-  }), 
-  getAllUsers: () => api.get('/admin/dashboard/users'),
-  getUser: (id) => api.get(`/admin/dashboard/users/${id}`),
+  getOverviewAnalytics: () => api.get('/analytics/overview'),
+  
+  // User Management
+  getAllUsers: () => api.get('/admin/users'),
+  
+  // Loan Pipeline Management
+  getAllLoans: (page = 0, size = 50) => api.get('/loans', { 
+    params: { page, size } 
+  }),
 };
 
+/**
+ * Loan application and lifecycle operations
+ */
 export const loanApi = {
   getAll: () => api.get('/loans'),
   getById: (id) => api.get(`/loans/${id}`),
-  getSummary: () => api.get('/loans/summary'),
-  getRepayments: (id) => api.get(`/loans/${id}/repayments`), // Added for Dashboard.jsx
   create: (loanData) => api.post('/loans', loanData),
   
-  // Admin Actions
+  // Manual Admin decision endpoints
   approve: (id, notes) => api.put(`/loans/${id}/approve`, { notes }),
   reject: (id, reason) => api.put(`/loans/${id}/reject`, { reason }),
   disburse: (id) => api.put(`/loans/${id}/disburse`),
 };
 
 /**
- * User Specific Endpoints 
- * This fixes the "does not provide an export named 'userApi'" error
+ * User profile operations
  */
 export const userApi = {
   getProfile: () => api.get('/users/me'),
   updateProfile: (data) => api.put('/users/me', data),
 };
 
-// --- UTILITIES ---
+// --- UTILITIES (Named Exports) ---
 
 export function formatCurrency(amount) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount || 0);
+  return new Intl.NumberFormat('en-US', { 
+    style: 'currency', 
+    currency: 'USD' 
+  }).format(amount || 0);
 }
 
 export function formatDate(dateString) {
   if (!dateString) return 'N/A';
-  return new Intl.DateTimeFormat('en-US', { 
-    year: 'numeric', month: 'short', day: 'numeric' 
-  }).format(new Date(dateString));
+  try {
+    return new Intl.DateTimeFormat('en-US', { 
+      year: 'numeric', 
+      month: 'short', 
+      day: 'numeric' 
+    }).format(new Date(dateString));
+  } catch (e) {
+    return 'Invalid Date';
+  }
 }
 
 export function getCreditScoreCategory(score) {
+  if (!score) return { label: 'N/A', color: 'text-slate-400' };
   if (score >= 740) return { label: 'Excellent', color: 'text-green-600' };
   if (score >= 670) return { label: 'Good', color: 'text-blue-500' };
   if (score >= 580) return { label: 'Fair', color: 'text-yellow-500' };

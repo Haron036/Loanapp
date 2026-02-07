@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
-import { authApi } from './api'; // Adjust path as needed
+import { authApi } from './api';
 
 const AuthContext = createContext(undefined);
 
@@ -7,91 +7,60 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
     const storedUser = localStorage.getItem('lendwise_user');
     const token = localStorage.getItem('token');
-    
-    try {
-      if (storedUser && token) {
-        return JSON.parse(storedUser);
-      }
-      return null;
-    } catch (e) {
-      return null;
+    if (storedUser && token) {
+      try { return JSON.parse(storedUser); } catch { return null; }
     }
+    return null;
   });
 
-  /* ================= LOGIN ================= */
   const login = useCallback(async (email, password) => {
-  try {
-    const response = await authApi.login({ email, password });
-    const { token, refreshToken, name, userId, email: userEmail, role } = response.data;
-
-    const userData = { id: userId, name, email: userEmail, role }; // singular 'role'
-
-    localStorage.setItem('token', token);
-    localStorage.setItem('refreshToken', refreshToken);
-    localStorage.setItem('lendwise_user', JSON.stringify(userData));
-
-    setUser(userData);
-    return { success: true };
-  } catch (error) {
-    console.error('Login error:', error);
-    return { success: false, error: error.response?.data?.message || 'Invalid email or password' };
-  }
-}, []);
-
-const register = useCallback(async (registrationData) => {
-  try {
-    const response = await authApi.register(registrationData);
-    const { token, refreshToken, name, userId, email, role } = response.data;
-
-    const userData = { id: userId, name, email, role }; // singular 'role'
-
-    localStorage.setItem('token', token);
-    localStorage.setItem('refreshToken', refreshToken);
-    localStorage.setItem('lendwise_user', JSON.stringify(userData));
-
-    setUser(userData);
-    return { success: true };
-  } catch (error) {
-    console.error('Registration error:', error);
-    return { 
-      success: false, 
-      message: error.response?.data?.message || 'Registration failed.',
-      details: error.response?.data?.details
-    };
-  }
-}, []);
-
-  /* ================= LOGOUT ================= */
-  const logout = useCallback(async () => {
     try {
-      await authApi.logout();
+      const { data } = await authApi.login({ email, password });
+      // The backend now returns role as "ROLE_ADMIN" or "ROLE_USER"
+      const userData = { 
+        id: data.userId, 
+        name: data.name, 
+        email: data.email, 
+        role: data.role 
+      };
+
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('refreshToken', data.refreshToken);
+      localStorage.setItem('lendwise_user', JSON.stringify(userData));
+
+      setUser(userData);
+      return { success: true };
     } catch (error) {
-      console.error('Logout error:', error);
-    } finally {
-      localStorage.removeItem('token');
-      localStorage.removeItem('refreshToken');
-      localStorage.removeItem('lendwise_user');
-      setUser(null);
+      return { success: false, error: error.response?.data?.message || 'Login failed' };
     }
   }, []);
 
+  const register = useCallback(async (registrationData) => {
+    try {
+      const { data } = await authApi.register(registrationData);
+      const userData = { id: data.userId, name: data.name, email: data.email, role: data.role };
+
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('lendwise_user', JSON.stringify(userData));
+
+      setUser(userData);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.response?.data?.message || 'Registration failed' };
+    }
+  }, []);
+
+  const logout = useCallback(async () => {
+    try { await authApi.logout(); } catch (e) { console.warn("Logout error", e); }
+    localStorage.clear();
+    setUser(null);
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ 
-      user, 
-      isAuthenticated: !!user, 
-      login, 
-      logout, 
-      register 
-    }}>
+    <AuthContext.Provider value={{ user, isAuthenticated: !!user, login, logout, register }}>
       {children}
     </AuthContext.Provider>
   );
 }
 
-export function useAuth() {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
-}
+export const useAuth = () => useContext(AuthContext);
