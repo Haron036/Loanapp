@@ -24,13 +24,15 @@ public class LoanController {
 
     // --- 👤 User Endpoints ---
 
-    @PostMapping
+    @PostMapping("/apply")
     public ResponseEntity<LoanDTO.Response> applyForLoan(
             @AuthenticationPrincipal UserDetails userDetails,
             @RequestBody LoanDTO.CreateRequest request
     ) {
         return ResponseEntity.ok(loanService.createLoan(userDetails.getUsername(), request));
     }
+
+
 
     @GetMapping("/my-loans")
     public ResponseEntity<Page<LoanDTO.Response>> getMyLoans(

@@ -44,14 +44,15 @@ public class LoanService {
         this.notificationService = notificationService;
     }
 
-    // --- Core Business Logic (Returning DTOs) ---
+    // --- Core Business Logic ---
 
     @Transactional
-    public LoanDTO.Response createLoan(String userId, LoanDTO.CreateRequest request) {
-        User user = userService.getUserById(userId);
+    public LoanDTO.Response createLoan(String userEmail, LoanDTO.CreateRequest request) {
+        // Get user by email instead of ID
+        User user = userService.getUserEntityByEmail(userEmail);
 
         List<LoanStatus> activeStatuses = List.of(LoanStatus.APPROVED, LoanStatus.DISBURSED, LoanStatus.REPAYING);
-        long activeCount = loanRepository.findByUserId(userId).stream()
+        long activeCount = loanRepository.findByUserId(user.getId()).stream()
                 .filter(l -> activeStatuses.contains(l.getStatus()))
                 .count();
 
@@ -79,6 +80,7 @@ public class LoanService {
         Loan savedLoan = loanRepository.save(loan);
         notificationService.sendLoanApplicationNotification(user, savedLoan);
 
+        log.info("Loan created for user {}: {}", user.getEmail(), savedLoan.getId());
         return convertToResponse(savedLoan);
     }
 
@@ -119,6 +121,7 @@ public class LoanService {
     @Transactional
     public LoanDTO.Response disburseLoan(String loanId) {
         Loan loan = getLoanEntityById(loanId);
+
         if (loan.getStatus() != LoanStatus.APPROVED) {
             throw new LoanProcessingException("Only approved loans can be disbursed.");
         }
@@ -135,7 +138,7 @@ public class LoanService {
         return convertToResponse(loanRepository.save(loan));
     }
 
-    // --- Data Retrieval (Mapped to DTO) ---
+    // --- Data Retrieval ---
 
     public LoanDTO.Response getLoanById(String id) {
         return convertToResponse(getLoanEntityById(id));
@@ -145,23 +148,18 @@ public class LoanService {
         return loanRepository.findAll(pageable).map(this::convertToResponse);
     }
 
-    public Page<LoanDTO.Response> getUserLoans(String userId, Pageable pageable) {
-        return loanRepository.findByUserId(userId, pageable).map(this::convertToResponse);
+    public Page<LoanDTO.Response> getUserLoans(String userEmail, Pageable pageable) {
+        User user = userService.getUserEntityByEmail(userEmail);
+        return loanRepository.findByUserId(user.getId(), pageable).map(this::convertToResponse);
     }
 
-    // --- Internal Helpers & Mappers ---
+    // --- Internal Helpers ---
 
-    /**
-     * Internal entity retriever (used only within service)
-     */
     private Loan getLoanEntityById(String id) {
         return loanRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Loan not found: " + id));
     }
 
-    /**
-     * ✅ The Mapper: Converts Entity to DTO to stop Infinite Recursion
-     */
     private LoanDTO.Response convertToResponse(Loan loan) {
         return LoanDTO.Response.builder()
                 .id(loan.getId())
@@ -176,7 +174,7 @@ public class LoanService {
                 .reviewedDate(loan.getReviewedDate())
                 .reviewedBy(loan.getReviewedBy())
                 .userId(loan.getUser().getId())
-                .userName(loan.getUser().getName()) // Extracts only name String
+                .userName(loan.getUser().getName())
                 .totalRepaid(loan.getTotalRepaid())
                 .dueDate(loan.getDueDate())
                 .build();
@@ -210,8 +208,10 @@ public class LoanService {
         repaymentRepository.saveAll(schedule);
     }
 
-    public LoanDTO.Summary getUserLoanSummary(String userId) {
-        List<Loan> userLoans = loanRepository.findByUserId(userId);
+    public LoanDTO.Summary getUserLoanSummary(String userEmail) {
+        User user = userService.getUserEntityByEmail(userEmail);
+        List<Loan> userLoans = loanRepository.findByUserId(user.getId());
+
         BigDecimal borrowed = BigDecimal.ZERO;
         BigDecimal repaid = BigDecimal.ZERO;
         BigDecimal monthly = BigDecimal.ZERO;

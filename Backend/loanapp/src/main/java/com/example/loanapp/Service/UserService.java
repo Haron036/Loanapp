@@ -45,15 +45,20 @@ public class UserService implements UserDetailsService {
     private final EmailService emailService;
     private final LoanService loanService;
 
+    // --- Authentication ---
     @Override
     public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
-        return userRepository.findByEmail(email)
-                .orElseThrow(() -> new UsernameNotFoundException("User not found: " + email));
+        User user = getUserEntityByEmail(email);
+        return new org.springframework.security.core.userdetails.User(
+                user.getEmail(),
+                user.getPassword(),
+                List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority(
+                        "ROLE_" + user.getRole().name()
+                ))
+        );
     }
 
-    /**
-     * Standard User Registration
-     */
+    // --- Registration & Admin Creation ---
     @Transactional
     public User registerUser(AuthDTO.RegisterRequest request) {
         if (userRepository.existsByEmail(request.getEmail())) {
@@ -76,10 +81,6 @@ public class UserService implements UserDetailsService {
         return savedUser;
     }
 
-    /**
-     * ✅ NEW: Admin Creation Logic
-     * Handles the mapping and persistence for administrative accounts.
-     */
     @Transactional
     public User createAdminUser(AuthDTO.RegisterRequest request) {
         if (userRepository.existsByEmail(request.getEmail())) {
@@ -88,7 +89,6 @@ public class UserService implements UserDetailsService {
 
         User admin = buildBaseUser(request);
         admin.setRole(User.Role.ADMIN);
-        // Admins typically don't require credit scores, but we maintain consistency
         admin.setCreditScore(850);
 
         User savedAdmin = userRepository.save(admin);
@@ -97,9 +97,6 @@ public class UserService implements UserDetailsService {
         return savedAdmin;
     }
 
-    /**
-     * Private helper to avoid repeating mapping logic between User and Admin
-     */
     private User buildBaseUser(AuthDTO.RegisterRequest request) {
         return User.builder()
                 .name(request.getName())
@@ -124,12 +121,11 @@ public class UserService implements UserDetailsService {
     }
 
     // --- Profile & Admin Views ---
+    public UserDTO.ProfileResponse getUserProfile(String email) {
+        User user = getUserEntityByEmail(email);
+        LoanDTO.Summary loanSummary = loanService.getUserLoanSummary(user.getId());
 
-    public UserDTO.ProfileResponse getUserProfile(String userId) {
-        User user = getUserById(userId);
-        LoanDTO.Summary loanSummary = loanService.getUserLoanSummary(userId);
-
-        List<UserDTO.ActivityDTO> activities = auditLogRepository.findRecentByUserId(userId, Pageable.ofSize(10))
+        List<UserDTO.ActivityDTO> activities = auditLogRepository.findRecentByUserId(user.getId(), Pageable.ofSize(10))
                 .stream()
                 .map(log -> new UserDTO.ActivityDTO(
                         log.getId().toString(), log.getAction(), log.getDetails(),
@@ -162,8 +158,7 @@ public class UserService implements UserDetailsService {
         return UserDTO.convertToAdminResponse(user, stats);
     }
 
-    // --- Statistics Calculations ---
-
+    // --- Statistics ---
     private UserDTO.UserStats calculateUserStats(String userId) {
         UserDTO.UserStats stats = new UserDTO.UserStats();
 
@@ -192,7 +187,6 @@ public class UserService implements UserDetailsService {
     }
 
     // --- Utilities ---
-
     public User getUserById(String userId) {
         return userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found ID: " + userId));
