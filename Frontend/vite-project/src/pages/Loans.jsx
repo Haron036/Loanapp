@@ -10,11 +10,13 @@ import {
   GraduationCap, 
   Car, 
   Heart,
-  ArrowRight
+  ArrowRight,
+  Zap
 } from 'lucide-react';
 
 const loanProducts = [
   {
+    id: 'PERSONAL',
     icon: Home,
     title: 'Personal Loans',
     description: "Flexible funding for life's important moments",
@@ -24,6 +26,7 @@ const loanProducts = [
     features: ['No collateral required', 'Fixed interest rates', 'Quick approval', 'No prepayment penalties'],
   },
   {
+    id: 'BUSINESS',
     icon: Briefcase,
     title: 'Business Loans',
     description: 'Fuel your business growth and expansion',
@@ -34,6 +37,7 @@ const loanProducts = [
     featured: true,
   },
   {
+    id: 'EDUCATION',
     icon: GraduationCap,
     title: 'Education Loans',
     description: 'Invest in your future with education financing',
@@ -43,6 +47,7 @@ const loanProducts = [
     features: ['Low interest rates', 'Deferred payments', 'Tuition & living', 'Flexible repayment'],
   },
   {
+    id: 'AUTO',
     icon: Car,
     title: 'Auto Loans',
     description: 'Drive away in your dream vehicle',
@@ -52,6 +57,7 @@ const loanProducts = [
     features: ['New & used vehicles', 'Competitive rates', 'Fast approval', 'Flexible terms'],
   },
   {
+    id: 'DEBT_CONSOLIDATION',
     icon: Heart,
     title: 'Debt Consolidation',
     description: 'Simplify your finances with one payment',
@@ -61,6 +67,7 @@ const loanProducts = [
     features: ['Lower monthly payments', 'Single payment', 'Reduce interest', 'Improve credit score'],
   },
   {
+    id: 'HOME_IMPROVEMENT',
     icon: Home,
     title: 'Home Improvement',
     description: 'Transform your home with renovation financing',
@@ -74,82 +81,99 @@ const loanProducts = [
 export default function Loans() {
   const navigate = useNavigate();
 
+  const handleApply = (loanType) => {
+    // Passes the selected loan type to the application page
+    navigate('/apply', { state: { selectedType: loanType } });
+  };
+
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background selection:bg-secondary/30">
       <Navbar />
       
-      {/* Page Header */}
-      <section className="bg-hero pt-32 pb-20 relative overflow-hidden">
+      {/* Page Header with Animated Background */}
+      <section className="bg-slate-900 pt-40 pb-24 relative overflow-hidden">
+        <div className="absolute inset-0 opacity-10">
+          <div className="absolute top-0 left-0 w-96 h-96 bg-secondary rounded-full filter blur-3xl -translate-x-1/2 -translate-y-1/2"></div>
+          <div className="absolute bottom-0 right-0 w-96 h-96 bg-primary rounded-full filter blur-3xl translate-x-1/2 translate-y-1/2"></div>
+        </div>
+        
         <div className="container mx-auto px-4 text-center relative z-10">
-          <h1 className="text-4xl md:text-5xl font-bold text-primary-foreground mb-4 animate-fade-up">
-            Our Loan Products
+          <Badge className="mb-4 bg-secondary/20 text-secondary border-secondary/30 hover:bg-secondary/20">
+            <Zap className="h-3 w-3 mr-1 fill-current" /> Fast Tracking 2026
+          </Badge>
+          <h1 className="text-4xl md:text-6xl font-bold text-white mb-6 tracking-tight">
+            Financial Solutions for <span className="text-secondary">Every Goal</span>
           </h1>
-          <p className="text-xl text-primary-foreground/70 max-w-2xl mx-auto animate-fade-up" style={{ animationDelay: '0.1s' }}>
-            Tailored financial solutions with transparent terms and competitive rates.
+          <p className="text-xl text-slate-400 max-w-2xl mx-auto leading-relaxed">
+            Tailored loan products with fixed rates and no hidden fees. Get an instant decision in under 2 minutes.
           </p>
         </div>
       </section>
 
       {/* Product Grid */}
-      <section className="py-20 -mt-12">
+      <section className="py-20 bg-slate-50/50">
         <div className="container mx-auto px-4">
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
             {loanProducts.map((product, index) => (
               <Card 
-                key={product.title}
-                className={`group border-none shadow-md transition-all duration-300 hover:shadow-2xl hover:-translate-y-2 animate-fade-up ${
-                  product.featured ? 'ring-2 ring-secondary' : ''
+                key={product.id}
+                className={`group relative overflow-hidden border-none shadow-sm transition-all duration-500 hover:shadow-xl hover:-translate-y-2 ${
+                  product.featured ? 'ring-2 ring-secondary bg-white' : 'bg-white'
                 }`}
-                style={{ animationDelay: `${index * 0.05}s` }}
               >
                 {product.featured && (
-                  <div className="absolute top-0 right-0 bg-secondary text-secondary-foreground text-[10px] font-bold px-3 py-1 rounded-bl-lg uppercase tracking-tighter">
-                    Most Popular
+                  <div className="absolute top-0 right-0 bg-secondary text-white text-[10px] font-black px-4 py-1.5 rounded-bl-2xl uppercase tracking-widest shadow-sm">
+                    Recommended
                   </div>
                 )}
                 
                 <CardHeader className="pb-4">
-                  <div className="flex items-center gap-4 mb-3">
-                    <div className="p-3 rounded-2xl bg-secondary/10 text-secondary group-hover:bg-secondary group-hover:text-white transition-colors">
+                  <div className="flex items-center gap-4 mb-4">
+                    <div className="p-3.5 rounded-2xl bg-slate-100 text-slate-900 group-hover:bg-secondary group-hover:text-white transition-all duration-300">
                       <product.icon className="h-6 w-6" />
                     </div>
-                    <CardTitle className="text-xl font-bold">{product.title}</CardTitle>
+                    <div>
+                      <CardTitle className="text-xl font-bold text-slate-900">{product.title}</CardTitle>
+                      <div className="h-1 w-8 bg-secondary mt-1 rounded-full group-hover:w-16 transition-all duration-500"></div>
+                    </div>
                   </div>
-                  <p className="text-sm text-muted-foreground leading-relaxed">{product.description}</p>
+                  <p className="text-sm text-slate-500 leading-relaxed min-h-[40px]">{product.description}</p>
                 </CardHeader>
 
                 <CardContent className="space-y-6">
-                  {/* Financial Quick-Look Table */}
-                  <div className="grid grid-cols-3 py-4 border-y border-muted/50 gap-2">
-                    <div className="text-center border-r border-muted/50">
-                      <p className="text-[10px] uppercase text-muted-foreground font-semibold">Rates</p>
-                      <p className="text-md font-bold text-secondary">{product.rate}</p>
+                  {/* Financial Stats Bar */}
+                  <div className="grid grid-cols-3 py-4 bg-slate-50 rounded-2xl border border-slate-100 gap-1">
+                    <div className="text-center border-r border-slate-200">
+                      <p className="text-[10px] uppercase text-slate-400 font-bold mb-1">APR</p>
+                      <p className="text-sm font-bold text-secondary">{product.rate}</p>
                     </div>
-                    <div className="text-center border-r border-muted/50">
-                      <p className="text-[10px] uppercase text-muted-foreground font-semibold">Max</p>
-                      <p className="text-md font-bold">{product.maxAmount}</p>
+                    <div className="text-center border-r border-slate-200">
+                      <p className="text-[10px] uppercase text-slate-400 font-bold mb-1">Up To</p>
+                      <p className="text-sm font-bold text-slate-900">{product.maxAmount}</p>
                     </div>
                     <div className="text-center">
-                      <p className="text-[10px] uppercase text-muted-foreground font-semibold">Term</p>
-                      <p className="text-md font-bold">{product.term.split(' ')[0]}</p>
+                      <p className="text-[10px] uppercase text-slate-400 font-bold mb-1">Term</p>
+                      <p className="text-sm font-bold text-slate-900">{product.term.split(' ')[0]}</p>
                     </div>
                   </div>
 
-                  <ul className="space-y-3">
+                  <ul className="space-y-3.5">
                     {product.features.map((feature) => (
-                      <li key={feature} className="flex items-center gap-3 text-sm text-muted-foreground">
-                        <CheckCircle2 className="h-4 w-4 text-success flex-shrink-0" />
+                      <li key={feature} className="flex items-center gap-3 text-sm text-slate-600">
+                        <div className="bg-emerald-100 p-0.5 rounded-full">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0" />
+                        </div>
                         {feature}
                       </li>
                     ))}
                   </ul>
 
                   <Button 
-                    className="w-full shadow-sm" 
-                    variant={product.featured ? 'hero' : 'outline'}
-                    onClick={() => navigate('/apply')}
+                    className="w-full h-12 text-md font-bold transition-all" 
+                    variant={product.featured ? 'default' : 'outline'}
+                    onClick={() => handleApply(product.id)}
                   >
-                    Apply Now <ArrowRight className="ml-2 h-4 w-4" />
+                    Apply Now <ArrowRight className="ml-2 h-4 w-4 group-hover:translate-x-1 transition-transform" />
                   </Button>
                 </CardContent>
               </Card>
@@ -158,17 +182,23 @@ export default function Loans() {
         </div>
       </section>
 
-      {/* Trust & Advisor CTA */}
-      <section className="py-24 border-t bg-muted/20">
-        <div className="container mx-auto px-4 text-center">
-          <div className="max-w-2xl mx-auto space-y-6">
-            <h2 className="text-3xl font-bold tracking-tight">Need Expert Guidance?</h2>
-            <p className="text-muted-foreground">
-              Choosing a loan is a big decision. Our advisors are available 24/7 to help you compare products and find the best fit for your financial goals.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
-              <Button size="lg" variant="hero" onClick={() => navigate('/apply')}>Start Application</Button>
-              <Button size="lg" variant="outline">Schedule a Call</Button>
+      {/* Interactive FAQ / Guidance Section */}
+      <section className="py-24 bg-white">
+        <div className="container mx-auto px-4">
+          <div className="max-w-4xl mx-auto bg-slate-900 rounded-[32px] p-8 md:p-16 text-center text-white relative overflow-hidden shadow-2xl">
+            <div className="relative z-10 space-y-6">
+              <h2 className="text-3xl md:text-4xl font-bold tracking-tight">Not sure which loan is right for you?</h2>
+              <p className="text-slate-400 text-lg max-w-xl mx-auto leading-relaxed">
+                Take our 30-second quiz to get a personalized recommendation based on your credit profile and financial goals.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
+                <Button size="lg" className="bg-secondary hover:bg-secondary/90 text-white font-bold h-14 px-8" onClick={() => navigate('/apply')}>
+                  Start Loan Quiz
+                </Button>
+                <Button size="lg" variant="outline" className="text-white border-slate-700 hover:bg-slate-800 h-14 px-8">
+                  Talk to an Advisor
+                </Button>
+              </div>
             </div>
           </div>
         </div>
@@ -176,5 +206,14 @@ export default function Loans() {
 
       <Footer />
     </div>
+  );
+}
+
+// Minimal Badge Component if not in your UI folder
+function Badge({ children, className }) {
+  return (
+    <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border ${className}`}>
+      {children}
+    </span>
   );
 }

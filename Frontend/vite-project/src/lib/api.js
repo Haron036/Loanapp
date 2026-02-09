@@ -30,7 +30,6 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Clear token and redirect to login
       localStorage.removeItem('token');
       if (window.location.pathname !== '/auth') window.location.href = '/auth';
     }
@@ -62,18 +61,15 @@ export const userApi = {
 // LOAN API
 // ==========================
 export const loanApi = {
-  // Apply for a new loan
-  create: (loanData) => api.post('/loans/apply', loanData), // 🔹 Important: /apply
-
-  // Get all loans for logged-in user
+  create: (loanData) => api.post('/loans/apply', loanData),
   getUserLoans: (page = 0, size = 10) => api.get('/loans/my-loans', { params: { page, size } }),
-
-  // Get loan by ID
   getById: (id) => api.get(`/loans/${id}`),
-
-  // Admin actions
-  approve: (id, notes) => api.put(`/loans/${id}/approve`, { notes }),
-  reject: (id, reason) => api.put(`/loans/${id}/reject`, { reason }),
+  getSummary: () => api.get('/loans/summary'),
+  getRepayments: (loanId) => api.get(`/loans/${loanId}/repayments`),
+  
+  // ADMIN/MANAGEMENT ACTIONS
+  approve: (id, data) => api.put(`/loans/${id}/approve`, data), 
+  reject: (id, data) => api.put(`/loans/${id}/reject`, data),
   disburse: (id) => api.put(`/loans/${id}/disburse`),
 };
 
@@ -91,22 +87,37 @@ export const adminApi = {
 // ==========================
 // UTILITIES
 // ==========================
+
+/**
+ * Formats numbers to Kenyan Shillings (KSh)
+ * Example: 50000 -> KSh 50,000
+ */
 export function formatCurrency(amount) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount || 0);
+  return new Intl.NumberFormat('en-KE', { 
+    style: 'currency', 
+    currency: 'KES',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0
+  }).format(amount || 0)
+    .replace('KES', 'KSh'); // Standard Kenyan display format
 }
 
 export function formatDate(dateString) {
   if (!dateString) return 'N/A';
   try {
-    return new Intl.DateTimeFormat('en-US', { year: 'numeric', month: 'short', day: 'numeric' }).format(new Date(dateString));
+    return new Intl.DateTimeFormat('en-GB', { // en-GB uses DD/MM/YYYY
+      year: 'numeric', 
+      month: 'short', 
+      day: 'numeric' 
+    }).format(new Date(dateString));
   } catch (e) { return 'Invalid Date'; }
 }
 
 export function getCreditScoreCategory(score) {
   if (!score) return { label: 'N/A', color: 'text-slate-400' };
-  if (score >= 740) return { label: 'Excellent', color: 'text-green-600' };
-  if (score >= 670) return { label: 'Good', color: 'text-blue-500' };
-  if (score >= 580) return { label: 'Fair', color: 'text-yellow-500' };
+  if (score >= 700) return { label: 'Excellent', color: 'text-green-600' };
+  if (score >= 600) return { label: 'Good', color: 'text-blue-500' };
+  if (score >= 500) return { label: 'Fair', color: 'text-yellow-500' };
   return { label: 'Poor', color: 'text-red-500' };
 }
 

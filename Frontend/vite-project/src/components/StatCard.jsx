@@ -32,16 +32,12 @@ export function StatCard({
       <CardContent className="pt-6">
         <div className="flex items-start justify-between">
           <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-              {title}
-            </p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">{title}</p>
             
             {loading ? (
               <Skeleton className="h-8 w-24" />
             ) : (
-              <p className="text-2xl font-bold tracking-tight text-slate-900">
-                {value}
-              </p>
+              <p className="text-2xl font-bold tracking-tight text-slate-900">{value}</p>
             )}
 
             <div className="flex flex-col gap-1">
@@ -53,10 +49,8 @@ export function StatCard({
                 <div className={`flex items-center text-xs font-bold ${
                   trend.positive ? 'text-emerald-600' : 'text-red-600'
                 }`}>
-                  <span className="mr-1">
-                    {trend.positive ? '▲' : '▼'}
-                  </span>
-                  {Math.abs(trend.value)}% 
+                  <span className="mr-1">{trend.positive ? '▲' : '▼'}</span>
+                  {Math.abs(trend.value)}%
                   <span className="ml-1 font-medium text-slate-400">vs last month</span>
                 </div>
               )}

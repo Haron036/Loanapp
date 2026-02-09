@@ -21,6 +21,8 @@ export function Navbar() {
     navigate('/');
   };
 
+  const isAdmin = user?.role?.toLowerCase() === 'admin';
+
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 glass border-b">
       <div className="container mx-auto px-4">
@@ -61,7 +63,7 @@ export function Navbar() {
                     <LayoutDashboard className="mr-2 h-4 w-4" />
                     Dashboard
                   </DropdownMenuItem>
-                  {user?.role === 'admin' && (
+                  {isAdmin && (
                     <DropdownMenuItem onClick={() => navigate('/admin')}>
                       <Shield className="mr-2 h-4 w-4" />
                       Admin Panel
@@ -123,10 +125,24 @@ export function Navbar() {
               <div className="flex flex-col gap-2 pt-4 border-t">
                 {isAuthenticated ? (
                   <>
-                    <Button variant="outline" onClick={() => { navigate('/dashboard'); setMobileMenuOpen(false); }}>
+                    <Button
+                      variant="outline"
+                      onClick={() => { navigate('/dashboard'); setMobileMenuOpen(false); }}
+                    >
                       Dashboard
                     </Button>
-                    <Button variant="destructive" onClick={() => { handleLogout(); setMobileMenuOpen(false); }}>
+                    {isAdmin && (
+                      <Button
+                        variant="accent"
+                        onClick={() => { navigate('/admin'); setMobileMenuOpen(false); }}
+                      >
+                        Admin Panel
+                      </Button>
+                    )}
+                    <Button
+                      variant="destructive"
+                      onClick={() => { handleLogout(); setMobileMenuOpen(false); }}
+                    >
                       Logout
                     </Button>
                   </>
