@@ -5,6 +5,7 @@ import com.example.loanapp.DTO.LoanDTO;
 import com.example.loanapp.DTO.UserDTO;
 import com.example.loanapp.Entity.AuditLog;
 import com.example.loanapp.Entity.Loan;
+import com.example.loanapp.Entity.Loan.LoanStatus;
 import com.example.loanapp.Entity.User;
 import com.example.loanapp.Exception.ResourceNotFoundException;
 import com.example.loanapp.Exception.UserAlreadyExistsException;
@@ -13,9 +14,8 @@ import com.example.loanapp.Repository.LoanRepository;
 import com.example.loanapp.Repository.RepaymentRepository;
 import com.example.loanapp.Repository.UserRepository;
 import jakarta.transaction.Transactional;
-import jakarta.validation.ValidationException;
 import lombok.RequiredArgsConstructor;
-import org.springframework.context.annotation.Lazy;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -25,10 +25,13 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class UserService implements UserDetailsService {
@@ -42,122 +45,103 @@ public class UserService implements UserDetailsService {
     private final EmailService emailService;
     private final LoanService loanService;
 
-    /**
-     * Encode a raw password (helper for controllers)
-     */
-    public String encodePassword(String rawPassword) {
-        return passwordEncoder.encode(rawPassword);
+    @Override
+    public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
+        return userRepository.findByEmail(email)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found: " + email));
     }
 
     /**
-     * Register a new user (self-registration or admin registration)
+     * Standard User Registration
      */
     @Transactional
     public User registerUser(AuthDTO.RegisterRequest request) {
         if (userRepository.existsByEmail(request.getEmail())) {
-            throw new UserAlreadyExistsException("Email '" + request.getEmail() + "' is already registered");
+            throw new UserAlreadyExistsException("Email already registered");
         }
 
-        User user = new User();
-        user.setName(request.getName());
-        user.setEmail(request.getEmail());
-        user.setPassword(passwordEncoder.encode(request.getPassword()));
-        user.setPhone(request.getPhone());
-        user.setAddress(request.getAddress());
-        user.setCity(request.getCity());
-        user.setState(request.getState());
-        user.setZipCode(request.getZipCode());
-        user.setDateOfBirth(request.getDateOfBirth());
-        user.setAnnualIncome(request.getAnnualIncome());
-        user.setEmploymentType(request.getEmploymentType());
-        user.setMonthlyDebt(request.getMonthlyDebt() != null ? request.getMonthlyDebt() : 0.0);
-
-        // Defaults
-        user.setExistingLoansCount(0);
+        User user = buildBaseUser(request);
         user.setRole(User.Role.USER);
-        user.setEnabled(true);
-        user.setAccountNonLocked(true);
-        user.setCreatedAt(LocalDateTime.now());
-
-        // Calculate initial credit score
         user.setCreditScore(creditScoreService.calculateCreditScore(user));
 
         User savedUser = userRepository.save(user);
 
-        // Send welcome email (do not rollback on failure)
         try {
             emailService.sendWelcomeEmail(savedUser);
         } catch (Exception e) {
-            System.err.println("Failed to send welcome email: " + e.getMessage());
+            log.warn("Welcome email failed: {}", e.getMessage());
         }
 
-        // Audit log
-        saveAuditLog("REGISTER", "USER", savedUser.getId(), savedUser.getId(), "User self-registered", "0.0.0.0");
-
+        saveAuditLog("REGISTER", "USER", savedUser.getId(), savedUser.getId(), "User self-registered");
         return savedUser;
     }
 
-    /* ================= GETTERS & AUTH ================= */
+    /**
+     * ✅ NEW: Admin Creation Logic
+     * Handles the mapping and persistence for administrative accounts.
+     */
+    @Transactional
+    public User createAdminUser(AuthDTO.RegisterRequest request) {
+        if (userRepository.existsByEmail(request.getEmail())) {
+            throw new UserAlreadyExistsException("Email already registered");
+        }
 
-    public User getUserById(String userId) {
-        return userRepository.findById(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + userId));
+        User admin = buildBaseUser(request);
+        admin.setRole(User.Role.ADMIN);
+        // Admins typically don't require credit scores, but we maintain consistency
+        admin.setCreditScore(850);
+
+        User savedAdmin = userRepository.save(admin);
+
+        saveAuditLog("ADMIN_CREATE", "USER", savedAdmin.getId(), "SYSTEM", "New Admin account provisioned");
+        return savedAdmin;
     }
 
-    public User getUserEntityByEmail(String email) {
-        return userRepository.findByEmail(email)
-                .orElseThrow(() -> new ResourceNotFoundException("User with email " + email + " not found"));
-    }
-
-    @Override
-    public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
-        User user = getUserEntityByEmail(email);
-        return org.springframework.security.core.userdetails.User.builder()
-                .username(user.getEmail())
-                .password(user.getPassword())
-                .authorities(user.getRole().name())
-                .disabled(!user.isEnabled())
-                .accountLocked(!user.isAccountNonLocked())
+    /**
+     * Private helper to avoid repeating mapping logic between User and Admin
+     */
+    private User buildBaseUser(AuthDTO.RegisterRequest request) {
+        return User.builder()
+                .name(request.getName())
+                .email(request.getEmail())
+                .password(passwordEncoder.encode(request.getPassword()))
+                .phone(request.getPhone())
+                .address(request.getAddress())
+                .city(request.getCity())
+                .state(request.getState())
+                .zipCode(request.getZipCode())
+                .dateOfBirth(request.getDateOfBirth())
+                .annualIncome(request.getAnnualIncome())
+                .employmentType(request.getEmploymentType())
+                .monthlyDebt(request.getMonthlyDebt() != null ? request.getMonthlyDebt() : 0.0)
+                .enabled(true)
+                .accountNonLocked(true)
+                .accountNonExpired(true)
+                .credentialsNonExpired(true)
+                .existingLoansCount(0)
+                .createdAt(LocalDateTime.now())
                 .build();
     }
 
-    /* ================= PASSWORD & PROFILE ================= */
-
-    @Transactional
-    public void changePassword(String userId, UserDTO.ChangePasswordRequest request) {
-        User user = getUserById(userId);
-        if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPassword())) {
-            throw new ValidationException("Current password incorrect");
-        }
-        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
-        userRepository.save(user);
-    }
+    // --- Profile & Admin Views ---
 
     public UserDTO.ProfileResponse getUserProfile(String userId) {
         User user = getUserById(userId);
         LoanDTO.Summary loanSummary = loanService.getUserLoanSummary(userId);
 
-        List<UserDTO.ActivityDTO> activities =
-                auditLogRepository.findRecentByUserId(userId, Pageable.ofSize(10))
-                        .stream()
-                        .map(this::mapToActivityDTO)
-                        .collect(Collectors.toList());
+        List<UserDTO.ActivityDTO> activities = auditLogRepository.findRecentByUserId(userId, Pageable.ofSize(10))
+                .stream()
+                .map(log -> new UserDTO.ActivityDTO(
+                        log.getId().toString(), log.getAction(), log.getDetails(),
+                        log.getEntityType(), log.getEntityId(), log.getTimestamp(), log.getIpAddress()))
+                .collect(Collectors.toList());
 
         return UserDTO.convertToProfileResponse(user, loanSummary, activities);
     }
 
-    /* ================= ADMIN HELPERS ================= */
-
-    public UserDTO.AdminResponse getUserForAdmin(String userId) {
-        User user = getUserById(userId);
-        UserDTO.UserStats stats = calculateUserStats(userId);
-        return UserDTO.convertToAdminResponse(user, stats);
-    }
-
     public UserDTO.PaginatedResponse getAllUsers(Pageable pageable) {
         Page<User> userPage = userRepository.findAll(pageable);
-        List<UserDTO.Response> users = userPage.getContent()
-                .stream()
+        List<UserDTO.Response> users = userPage.getContent().stream()
                 .map(UserDTO::convertToResponse)
                 .collect(Collectors.toList());
 
@@ -166,53 +150,68 @@ public class UserService implements UserDetailsService {
         response.setCurrentPage(userPage.getNumber());
         response.setTotalPages(userPage.getTotalPages());
         response.setTotalItems(userPage.getTotalElements());
+        response.setPageSize(userPage.getSize());
+        response.setHasNext(userPage.hasNext());
+        response.setHasPrevious(userPage.hasPrevious());
         return response;
     }
 
+    public UserDTO.AdminResponse getUserForAdmin(String userId) {
+        User user = getUserById(userId);
+        UserDTO.UserStats stats = calculateUserStats(userId);
+        return UserDTO.convertToAdminResponse(user, stats);
+    }
+
+    // --- Statistics Calculations ---
+
     private UserDTO.UserStats calculateUserStats(String userId) {
         UserDTO.UserStats stats = new UserDTO.UserStats();
+
         stats.setTotalLoanApplications(loanRepository.countByUserId(userId));
-        stats.setApprovedLoans(loanRepository.countByUserIdAndStatus(userId, Loan.LoanStatus.APPROVED));
-        stats.setRejectedLoans(loanRepository.countByUserIdAndStatus(userId, Loan.LoanStatus.REJECTED));
+        stats.setApprovedLoans(loanRepository.countByUserIdAndStatus(userId, LoanStatus.APPROVED));
+        stats.setRejectedLoans(loanRepository.countByUserIdAndStatus(userId, LoanStatus.REJECTED));
 
         BigDecimal borrowed = loanRepository.sumAmountByUserIdAndStatusIn(
-                userId, List.of(Loan.LoanStatus.APPROVED, Loan.LoanStatus.REPAYING, Loan.LoanStatus.COMPLETED));
+                userId, Arrays.asList(LoanStatus.APPROVED, LoanStatus.DISBURSED, LoanStatus.REPAYING, LoanStatus.COMPLETED));
         stats.setTotalBorrowed(borrowed != null ? borrowed : BigDecimal.ZERO);
 
         BigDecimal repaid = repaymentRepository.sumPaidAmountByUserId(userId);
         stats.setTotalRepaid(repaid != null ? repaid : BigDecimal.ZERO);
 
         long totalRepayments = repaymentRepository.countByLoan_User_Id(userId);
-        long onTime = repaymentRepository.countByUserIdAndPaidOnTime(userId);
-        stats.setOnTimeRepaymentRate(totalRepayments > 0 ?
-                BigDecimal.valueOf((onTime * 100.0) / totalRepayments) : BigDecimal.ZERO);
+        if (totalRepayments > 0) {
+            long onTime = repaymentRepository.countByUserIdAndPaidOnTime(userId);
+            stats.setOnTimeRepaymentRate(BigDecimal.valueOf(onTime)
+                    .multiply(BigDecimal.valueOf(100))
+                    .divide(BigDecimal.valueOf(totalRepayments), 2, RoundingMode.HALF_UP));
+        } else {
+            stats.setOnTimeRepaymentRate(BigDecimal.ZERO);
+        }
 
         return stats;
     }
 
-    /* ================= UTILITIES ================= */
+    // --- Utilities ---
 
-    private void saveAuditLog(String action, String type, String entityId, String userId, String details, String ip) {
-        AuditLog log = new AuditLog();
-        log.setAction(action);
-        log.setEntityType(type);
-        log.setEntityId(entityId);
-        log.setUserId(userId);
-        log.setDetails(details);
-        log.setIpAddress(ip != null ? ip : "0.0.0.0");
-        log.setTimestamp(LocalDateTime.now());
-        auditLogRepository.save(log);
+    public User getUserById(String userId) {
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found ID: " + userId));
     }
 
-    private UserDTO.ActivityDTO mapToActivityDTO(AuditLog log) {
-        return new UserDTO.ActivityDTO(
-                log.getId().toString(),
-                log.getAction(),
-                log.getDetails(),
-                log.getEntityType(),
-                log.getEntityId(),
-                log.getTimestamp(),
-                log.getIpAddress()
-        );
+    public User getUserEntityByEmail(String email) {
+        return userRepository.findByEmail(email)
+                .orElseThrow(() -> new ResourceNotFoundException("Email not found: " + email));
+    }
+
+    public String encodePassword(String rawPassword) {
+        return passwordEncoder.encode(rawPassword);
+    }
+
+    private void saveAuditLog(String action, String type, String entityId, String userId, String details) {
+        AuditLog auditLog = AuditLog.builder()
+                .action(action).entityType(type).entityId(entityId)
+                .userId(userId).details(details).timestamp(LocalDateTime.now())
+                .ipAddress("0.0.0.0").build();
+        auditLogRepository.save(auditLog);
     }
 }

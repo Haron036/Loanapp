@@ -7,7 +7,6 @@ import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
-import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -27,7 +26,7 @@ import java.util.List;
 
 @Configuration
 @EnableWebSecurity
-@EnableMethodSecurity // Allows @PreAuthorize to work on Controllers
+@EnableMethodSecurity
 @RequiredArgsConstructor
 public class SecurityConfig {
 
@@ -46,37 +45,38 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                // 1. Disable CSRF (Stateless API) & Enable CORS
+                // 1. Foundation: Disable CSRF for stateless JWT and apply CORS
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
-                .cors(Customizer.withDefaults())
 
-                // 2. Authorization Rules
+                // 2. Authorization Rules: Order matters!
                 .authorizeHttpRequests(auth -> auth
-                        // Publicly accessible
+                        // Public Access
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/auth/**", "/error", "/v3/api-docs/**", "/swagger-ui/**").permitAll()
+
+                        // Admin Registration: We permitAll at the filter level because the
+                        // AdminController handles the internal logic (checking if admins exist).
                         .requestMatchers("/api/admin/register").permitAll()
 
-                        // Analytics - Must allow ADMIN/OFFICER at the filter level
+                        // Analytics & Management: Explicit Role requirements
                         .requestMatchers("/api/analytics/**").hasAnyRole("ADMIN", "LOAN_OFFICER")
-
-                        // Admin specific paths
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
 
-                        // Loans & Users - Require authentication (Controller @PreAuthorize handles roles)
+                        // General Secured Resources
                         .requestMatchers("/api/loans/**").authenticated()
                         .requestMatchers("/api/users/**").authenticated()
 
-                        // Default fallback
+                        // Fallback
                         .anyRequest().authenticated()
                 )
 
-                // 3. Stateless Session (JWT)
+                // 3. Stateless Session Management
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
 
+                // 4. Identity Providers & Filters
                 .authenticationProvider(authenticationProvider())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
@@ -86,8 +86,8 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        // Be specific with origins for security
-        configuration.setAllowedOrigins(List.of("http://localhost:5173", "http://localhost:3000"));
+        // Updated to include common development ports
+        configuration.setAllowedOrigins(List.of("http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"));
         configuration.setExposedHeaders(List.of("Authorization"));

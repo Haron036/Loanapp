@@ -5,17 +5,19 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
+import lombok.Builder; // Added
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
-
 public class LoanDTO {
+
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
+    @Builder // Added for convenience
     public static class CreateRequest {
         @NotNull
         @DecimalMin(value = "1000.00")
@@ -34,6 +36,7 @@ public class LoanDTO {
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
+    @Builder
     public static class UpdateStatusRequest {
         @NotNull
         private Loan.LoanStatus status;
@@ -45,6 +48,7 @@ public class LoanDTO {
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
+    @Builder // Highly recommended for entity-to-dto mapping
     public static class Response {
         private String id;
         private BigDecimal amount;
@@ -68,6 +72,7 @@ public class LoanDTO {
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
+    @Builder
     public static class Summary {
         private BigDecimal totalBorrowed;
         private BigDecimal totalRepaid;

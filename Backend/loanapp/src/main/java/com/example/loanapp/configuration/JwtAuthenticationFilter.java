@@ -8,9 +8,10 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.lang.NonNull;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -25,20 +26,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final JwtService jwtService;
     private final UserDetailsService userDetailsService;
 
-    /**
-     * Skip filtering for public endpoints and first admin registration
-     */
-    @Override
-    protected boolean shouldNotFilter(HttpServletRequest request) {
-        String path = request.getServletPath();
-        return path.startsWith("/api/auth/")           // login, register
-                || path.startsWith("/api/public/")     // public endpoints
-                || path.equals("/api/admin/register")  // allow first admin registration without token
-                || path.startsWith("/v3/api-docs")    // swagger docs
-                || path.startsWith("/swagger-ui")
-                || path.equals("/favicon.ico");
-    }
-
     @Override
     protected void doFilterInternal(
             @NonNull HttpServletRequest request,
@@ -46,49 +33,61 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             @NonNull FilterChain filterChain
     ) throws ServletException, IOException {
 
-        String authHeader = request.getHeader("Authorization");
+        final String authHeader = request.getHeader("Authorization");
+        final String jwt;
+        final String userEmail;
 
+        // 1. Quick Exit: No Bearer token
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            // No token, skip authentication
             filterChain.doFilter(request, response);
             return;
         }
 
-        String jwt = authHeader.substring(7); // Remove "Bearer "
-        String username;
+        // 2. Extract Token
+        jwt = authHeader.substring(7);
 
         try {
-            username = jwtService.extractUsername(jwt);
-        } catch (Exception e) {
-            log.warn("Invalid JWT token: {}", e.getMessage());
-            filterChain.doFilter(request, response);
-            return;
-        }
+            userEmail = jwtService.extractUsername(jwt);
 
-        if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-            try {
-                UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+            // 3. Authenticate if username exists and context is empty
+            if (userEmail != null && SecurityContextHolder.getContext().getAuthentication() == null) {
+                UserDetails userDetails = this.userDetailsService.loadUserByUsername(userEmail);
 
                 if (jwtService.isTokenValid(jwt, userDetails)) {
-                    UsernamePasswordAuthenticationToken authToken =
-                            new UsernamePasswordAuthenticationToken(
-                                    userDetails,
-                                    null,
-                                    userDetails.getAuthorities()
-                            );
+                    UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
+                            userDetails,
+                            null,
+                            userDetails.getAuthorities()
+                    );
 
                     authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
+                    // Final Handshake
                     SecurityContextHolder.getContext().setAuthentication(authToken);
-                    log.info("JWT authentication successful for user: {}", username);
+
+                    // CRITICAL LOG: This tells you exactly why you might get a 403 later
+                    log.info("Authenticated [{}], Roles: {}", userEmail, userDetails.getAuthorities());
                 } else {
-                    log.warn("JWT token is invalid or expired for user: {}", username);
+                    log.warn("JWT Token is invalid or expired for: {}", userEmail);
                 }
-            } catch (Exception ex) {
-                log.warn("User not found or authentication failed: {}", ex.getMessage());
             }
+        } catch (UsernameNotFoundException e) {
+            log.error("User not found: {}", e.getMessage());
+        } catch (Exception e) {
+            log.error("Could not set user authentication: {}", e.getMessage());
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    @Override
+    protected boolean shouldNotFilter(@NonNull HttpServletRequest request) {
+        String path = request.getServletPath();
+        // Keep these consistent with your SecurityConfig permitAll() paths
+        return path.startsWith("/api/auth/")
+                || path.equals("/api/admin/register")
+                || path.startsWith("/v3/api-docs")
+                || path.startsWith("/swagger-ui")
+                || path.startsWith("/api/public/");
     }
 }

@@ -1,6 +1,7 @@
 package com.example.loanapp.Entity;
 
 import jakarta.persistence.*;
+import lombok.*; // This is the key import
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
@@ -11,6 +12,11 @@ import java.util.List;
 
 @Entity
 @Table(name = "loans")
+@Getter // Replaces manual getters
+@Setter // Replaces manual setters
+@NoArgsConstructor // Replaces manual empty constructor
+@AllArgsConstructor // Required for @Builder
+@Builder // FIX: Adds the .builder() method for LoanService
 public class Loan {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -32,6 +38,7 @@ public class Loan {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
+    @Builder.Default // Ensures Builder doesn't overwrite default with null
     private LoanStatus status = LoanStatus.PENDING;
 
     @Column(precision = 5, scale = 2)
@@ -41,6 +48,7 @@ public class Loan {
     private BigDecimal monthlyPayment;
 
     @Column(precision = 12, scale = 2)
+    @Builder.Default
     private BigDecimal totalRepaid = BigDecimal.ZERO;
 
     private Integer creditScore;
@@ -61,199 +69,6 @@ public class Loan {
 
     @OneToMany(mappedBy = "loan", cascade = CascadeType.ALL)
     private List<Repayment> repayments;
-
-    // Constructors
-    public Loan() {
-    }
-
-    public Loan(String id, User user, BigDecimal amount, Integer termMonths, LoanPurpose purpose,
-                LoanStatus status, BigDecimal interestRate, BigDecimal monthlyPayment,
-                BigDecimal totalRepaid, Integer creditScore, LocalDate appliedDate,
-                LocalDate reviewedDate, LocalDate disbursedDate, LocalDate dueDate,
-                LocalDate completedDate, String reviewedBy, String rejectionReason,
-                LocalDateTime createdAt, LocalDateTime updatedAt, List<Repayment> repayments) {
-        this.id = id;
-        this.user = user;
-        this.amount = amount;
-        this.termMonths = termMonths;
-        this.purpose = purpose;
-        this.status = status;
-        this.interestRate = interestRate;
-        this.monthlyPayment = monthlyPayment;
-        this.totalRepaid = totalRepaid;
-        this.creditScore = creditScore;
-        this.appliedDate = appliedDate;
-        this.reviewedDate = reviewedDate;
-        this.disbursedDate = disbursedDate;
-        this.dueDate = dueDate;
-        this.completedDate = completedDate;
-        this.reviewedBy = reviewedBy;
-        this.rejectionReason = rejectionReason;
-        this.createdAt = createdAt;
-        this.updatedAt = updatedAt;
-        this.repayments = repayments;
-    }
-
-    // Getters and Setters
-    public String getId() {
-        return id;
-    }
-
-    public void setId(String id) {
-        this.id = id;
-    }
-
-    public User getUser() {
-        return user;
-    }
-
-    public void setUser(User user) {
-        this.user = user;
-    }
-
-    public BigDecimal getAmount() {
-        return amount;
-    }
-
-    public void setAmount(BigDecimal amount) {
-        this.amount = amount;
-    }
-
-    public Integer getTermMonths() {
-        return termMonths;
-    }
-
-    public void setTermMonths(Integer termMonths) {
-        this.termMonths = termMonths;
-    }
-
-    public LoanPurpose getPurpose() {
-        return purpose;
-    }
-
-    public void setPurpose(LoanPurpose purpose) {
-        this.purpose = purpose;
-    }
-
-    public LoanStatus getStatus() {
-        return status;
-    }
-
-    public void setStatus(LoanStatus status) {
-        this.status = status;
-    }
-
-    public BigDecimal getInterestRate() {
-        return interestRate;
-    }
-
-    public void setInterestRate(BigDecimal interestRate) {
-        this.interestRate = interestRate;
-    }
-
-    public BigDecimal getMonthlyPayment() {
-        return monthlyPayment;
-    }
-
-    public void setMonthlyPayment(BigDecimal monthlyPayment) {
-        this.monthlyPayment = monthlyPayment;
-    }
-
-    public BigDecimal getTotalRepaid() {
-        return totalRepaid;
-    }
-
-    public void setTotalRepaid(BigDecimal totalRepaid) {
-        this.totalRepaid = totalRepaid;
-    }
-
-    public Integer getCreditScore() {
-        return creditScore;
-    }
-
-    public void setCreditScore(Integer creditScore) {
-        this.creditScore = creditScore;
-    }
-
-    public LocalDate getAppliedDate() {
-        return appliedDate;
-    }
-
-    public void setAppliedDate(LocalDate appliedDate) {
-        this.appliedDate = appliedDate;
-    }
-
-    public LocalDate getReviewedDate() {
-        return reviewedDate;
-    }
-
-    public void setReviewedDate(LocalDate reviewedDate) {
-        this.reviewedDate = reviewedDate;
-    }
-
-    public LocalDate getDisbursedDate() {
-        return disbursedDate;
-    }
-
-    public void setDisbursedDate(LocalDate disbursedDate) {
-        this.disbursedDate = disbursedDate;
-    }
-
-    public LocalDate getDueDate() {
-        return dueDate;
-    }
-
-    public void setDueDate(LocalDate dueDate) {
-        this.dueDate = dueDate;
-    }
-
-    public LocalDate getCompletedDate() {
-        return completedDate;
-    }
-
-    public void setCompletedDate(LocalDate completedDate) {
-        this.completedDate = completedDate;
-    }
-
-    public String getReviewedBy() {
-        return reviewedBy;
-    }
-
-    public void setReviewedBy(String reviewedBy) {
-        this.reviewedBy = reviewedBy;
-    }
-
-    public String getRejectionReason() {
-        return rejectionReason;
-    }
-
-    public void setRejectionReason(String rejectionReason) {
-        this.rejectionReason = rejectionReason;
-    }
-
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
-    }
-
-    public LocalDateTime getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public void setUpdatedAt(LocalDateTime updatedAt) {
-        this.updatedAt = updatedAt;
-    }
-
-    public List<Repayment> getRepayments() {
-        return repayments;
-    }
-
-    public void setRepayments(List<Repayment> repayments) {
-        this.repayments = repayments;
-    }
 
     // Enums
     public enum LoanStatus {

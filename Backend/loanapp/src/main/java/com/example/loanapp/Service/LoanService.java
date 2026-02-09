@@ -2,6 +2,7 @@ package com.example.loanapp.Service;
 
 import com.example.loanapp.DTO.LoanDTO;
 import com.example.loanapp.Entity.Loan;
+import com.example.loanapp.Entity.Loan.LoanStatus;
 import com.example.loanapp.Entity.Repayment;
 import com.example.loanapp.Entity.User;
 import com.example.loanapp.Exception.LoanProcessingException;
@@ -9,6 +10,7 @@ import com.example.loanapp.Exception.ResourceNotFoundException;
 import com.example.loanapp.Repository.LoanRepository;
 import com.example.loanapp.Repository.RepaymentRepository;
 import jakarta.transaction.Transactional;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -20,6 +22,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
+@Slf4j
 @Service
 public class LoanService {
 
@@ -41,193 +44,196 @@ public class LoanService {
         this.notificationService = notificationService;
     }
 
+    // --- Core Business Logic (Returning DTOs) ---
+
     @Transactional
-    public Loan createLoan(String userId, LoanDTO.CreateRequest request) {
+    public LoanDTO.Response createLoan(String userId, LoanDTO.CreateRequest request) {
         User user = userService.getUserById(userId);
 
-        List<Loan> activeLoans = loanRepository.findByUserIdAndStatus(userId, Loan.LoanStatus.REPAYING);
-        if (activeLoans.size() >= 3) {
-            throw new LoanProcessingException("Maximum number of active loans reached");
+        List<LoanStatus> activeStatuses = List.of(LoanStatus.APPROVED, LoanStatus.DISBURSED, LoanStatus.REPAYING);
+        long activeCount = loanRepository.findByUserId(userId).stream()
+                .filter(l -> activeStatuses.contains(l.getStatus()))
+                .count();
+
+        if (activeCount >= 3) {
+            throw new LoanProcessingException("Maximum limit of 3 active loans reached.");
         }
 
-        Integer creditScore = creditScoreService.calculateCreditScore(user);
+        Integer creditScore = user.getCreditScore() != null ? user.getCreditScore() : creditScoreService.calculateCreditScore(user);
         BigDecimal interestRate = calculateInterestRate(creditScore, request.getTermMonths());
         BigDecimal monthlyPayment = calculateMonthlyPayment(request.getAmount(), interestRate, request.getTermMonths());
 
-        Loan loan = new Loan();
-        loan.setUser(user);
-        loan.setAmount(request.getAmount());
-        loan.setTermMonths(request.getTermMonths());
-        loan.setPurpose(request.getPurpose());
-        loan.setCreditScore(creditScore);
-        loan.setInterestRate(interestRate);
-        loan.setMonthlyPayment(monthlyPayment);
-        loan.setStatus(Loan.LoanStatus.PENDING);
-        loan.setAppliedDate(LocalDate.now());
+        Loan loan = Loan.builder()
+                .user(user)
+                .amount(request.getAmount())
+                .termMonths(request.getTermMonths())
+                .purpose(request.getPurpose())
+                .creditScore(creditScore)
+                .interestRate(interestRate)
+                .monthlyPayment(monthlyPayment)
+                .status(LoanStatus.PENDING)
+                .appliedDate(LocalDate.now())
+                .totalRepaid(BigDecimal.ZERO)
+                .build();
 
         Loan savedLoan = loanRepository.save(loan);
-
-        // Auto-approval logic
-        if (creditScore >= 650 && request.getAmount().compareTo(BigDecimal.valueOf(50000)) <= 0) {
-            approveLoan(savedLoan.getId(), "Auto-approved based on credit score");
-        }
-
         notificationService.sendLoanApplicationNotification(user, savedLoan);
-        return savedLoan;
+
+        return convertToResponse(savedLoan);
     }
 
     @Transactional
-    public Loan approveLoan(String loanId, String notes) {
-        Loan loan = getLoanById(loanId);
-        if (loan.getStatus() != Loan.LoanStatus.PENDING && loan.getStatus() != Loan.LoanStatus.UNDER_REVIEW) {
-            throw new LoanProcessingException("Loan cannot be approved in current status");
+    public LoanDTO.Response approveLoan(String loanId, String adminId, String notes) {
+        Loan loan = getLoanEntityById(loanId);
+
+        if (loan.getStatus() != LoanStatus.PENDING) {
+            throw new LoanProcessingException("Only PENDING loans can be approved.");
         }
 
-        loan.setStatus(Loan.LoanStatus.APPROVED);
+        loan.setStatus(LoanStatus.APPROVED);
         loan.setReviewedDate(LocalDate.now());
-        loan.setReviewedBy("SYSTEM_AUTO");
+        loan.setReviewedBy(adminId);
         loan.setDueDate(LocalDate.now().plusMonths(loan.getTermMonths()));
 
         generateRepaymentSchedule(loan);
-        Loan approvedLoan = loanRepository.save(loan);
-        notificationService.sendLoanApprovalNotification(loan.getUser(), approvedLoan);
-        return approvedLoan;
+
+        return convertToResponse(loanRepository.save(loan));
     }
 
     @Transactional
-    public Loan rejectLoan(String loanId, String reason) {
-        Loan loan = getLoanById(loanId);
-        if (loan.getStatus() != Loan.LoanStatus.PENDING && loan.getStatus() != Loan.LoanStatus.UNDER_REVIEW) {
-            throw new LoanProcessingException("Loan cannot be rejected in current status");
+    public LoanDTO.Response rejectLoan(String loanId, String adminId, String reason) {
+        Loan loan = getLoanEntityById(loanId);
+
+        if (loan.getStatus() != LoanStatus.PENDING) {
+            throw new LoanProcessingException("Only PENDING loans can be rejected.");
         }
 
-        loan.setStatus(Loan.LoanStatus.REJECTED);
-        loan.setReviewedDate(LocalDate.now());
-        loan.setReviewedBy("SYSTEM_AUTO");
+        loan.setStatus(LoanStatus.REJECTED);
         loan.setRejectionReason(reason);
+        loan.setReviewedBy(adminId);
+        loan.setReviewedDate(LocalDate.now());
 
-        Loan rejectedLoan = loanRepository.save(loan);
-        notificationService.sendLoanRejectionNotification(loan.getUser(), rejectedLoan);
-        return rejectedLoan;
+        return convertToResponse(loanRepository.save(loan));
     }
 
     @Transactional
-    public Loan disburseLoan(String loanId) {
-        Loan loan = getLoanById(loanId);
-        if (loan.getStatus() != Loan.LoanStatus.APPROVED) {
-            throw new LoanProcessingException("Only approved loans can be disbursed");
+    public LoanDTO.Response disburseLoan(String loanId) {
+        Loan loan = getLoanEntityById(loanId);
+        if (loan.getStatus() != LoanStatus.APPROVED) {
+            throw new LoanProcessingException("Only approved loans can be disbursed.");
         }
 
-        loan.setStatus(Loan.LoanStatus.DISBURSED);
+        loan.setStatus(LoanStatus.DISBURSED);
         loan.setDisbursedDate(LocalDate.now());
 
-        List<Repayment> repayments = repaymentRepository.findByLoanIdOrderByDueDateAsc(loanId);
-        if (!repayments.isEmpty()) {
-            // Update the first repayment date to be 1 month from disbursement
-            Repayment firstRepayment = repayments.get(0);
-            firstRepayment.setDueDate(LocalDate.now().plusMonths(1));
-            repaymentRepository.save(firstRepayment);
+        List<Repayment> schedule = repaymentRepository.findByLoanIdOrderByDueDateAsc(loanId);
+        for (int i = 0; i < schedule.size(); i++) {
+            schedule.get(i).setDueDate(LocalDate.now().plusMonths(i + 1));
         }
+        repaymentRepository.saveAll(schedule);
 
-        return loanRepository.save(loan);
+        return convertToResponse(loanRepository.save(loan));
     }
 
-    // ================== DATA RETRIEVAL METHODS ==================
+    // --- Data Retrieval (Mapped to DTO) ---
 
-    public Loan getLoanById(String id) {
+    public LoanDTO.Response getLoanById(String id) {
+        return convertToResponse(getLoanEntityById(id));
+    }
+
+    public Page<LoanDTO.Response> getAllLoans(Pageable pageable) {
+        return loanRepository.findAll(pageable).map(this::convertToResponse);
+    }
+
+    public Page<LoanDTO.Response> getUserLoans(String userId, Pageable pageable) {
+        return loanRepository.findByUserId(userId, pageable).map(this::convertToResponse);
+    }
+
+    // --- Internal Helpers & Mappers ---
+
+    /**
+     * Internal entity retriever (used only within service)
+     */
+    private Loan getLoanEntityById(String id) {
         return loanRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Loan not found with ID: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException("Loan not found: " + id));
     }
 
-    public Page<Loan> getAllLoans(Pageable pageable) {
-        return loanRepository.findAll(pageable);
+    /**
+     * ✅ The Mapper: Converts Entity to DTO to stop Infinite Recursion
+     */
+    private LoanDTO.Response convertToResponse(Loan loan) {
+        return LoanDTO.Response.builder()
+                .id(loan.getId())
+                .amount(loan.getAmount())
+                .termMonths(loan.getTermMonths())
+                .purpose(loan.getPurpose().name())
+                .status(loan.getStatus().name())
+                .interestRate(loan.getInterestRate())
+                .monthlyPayment(loan.getMonthlyPayment())
+                .creditScore(loan.getCreditScore())
+                .appliedDate(loan.getAppliedDate())
+                .reviewedDate(loan.getReviewedDate())
+                .reviewedBy(loan.getReviewedBy())
+                .userId(loan.getUser().getId())
+                .userName(loan.getUser().getName()) // Extracts only name String
+                .totalRepaid(loan.getTotalRepaid())
+                .dueDate(loan.getDueDate())
+                .build();
     }
 
-    public Page<Loan> getUserLoans(String userId, Pageable pageable) {
-        return loanRepository.findByUserId(userId, pageable);
+    private BigDecimal calculateInterestRate(Integer score, Integer months) {
+        double base = 10.0;
+        if (score >= 750) base -= 3.0;
+        if (months > 36) base += 2.0;
+        return BigDecimal.valueOf(base);
     }
 
-    public List<Loan> findByUserId(String userId) {
-        return loanRepository.findByUserId(userId);
+    private BigDecimal calculateMonthlyPayment(BigDecimal p, BigDecimal rate, int months) {
+        BigDecimal mRate = rate.divide(BigDecimal.valueOf(1200), 10, RoundingMode.HALF_UP);
+        BigDecimal factor = BigDecimal.ONE.add(mRate).pow(months);
+        return p.multiply(mRate.multiply(factor))
+                .divide(factor.subtract(BigDecimal.ONE), 2, RoundingMode.HALF_UP);
     }
 
-    public Page<Loan> getLoansByStatus(Loan.LoanStatus status, Pageable pageable) {
-        return loanRepository.findByStatus(status, pageable);
-    }
-
-    // IMPORTANT: Required by LoanController for the Dashboard repayment list
-    public List<Repayment> getRepaymentsByLoanId(String loanId) {
-        return repaymentRepository.findByLoanIdOrderByDueDateAsc(loanId);
+    private void generateRepaymentSchedule(Loan loan) {
+        List<Repayment> schedule = new ArrayList<>();
+        for (int i = 1; i <= loan.getTermMonths(); i++) {
+            schedule.add(Repayment.builder()
+                    .loan(loan)
+                    .installmentNumber(i)
+                    .amount(loan.getMonthlyPayment())
+                    .dueDate(LocalDate.now().plusMonths(i))
+                    .status(Repayment.RepaymentStatus.PENDING)
+                    .build());
+        }
+        repaymentRepository.saveAll(schedule);
     }
 
     public LoanDTO.Summary getUserLoanSummary(String userId) {
         List<Loan> userLoans = loanRepository.findByUserId(userId);
-        BigDecimal totalBorrowed = BigDecimal.ZERO;
-        BigDecimal totalRepaid = BigDecimal.ZERO;
-        int activeLoansCount = 0;
-        int pendingDue = 0;
-        BigDecimal monthlyPayment = BigDecimal.ZERO;
+        BigDecimal borrowed = BigDecimal.ZERO;
+        BigDecimal repaid = BigDecimal.ZERO;
+        BigDecimal monthly = BigDecimal.ZERO;
+        int active = 0;
 
-        for (Loan loan : userLoans) {
-            if (loan.getStatus() == Loan.LoanStatus.REPAYING ||
-                    loan.getStatus() == Loan.LoanStatus.DISBURSED ||
-                    loan.getStatus() == Loan.LoanStatus.APPROVED) {
+        List<LoanStatus> activeStatuses = List.of(LoanStatus.DISBURSED, LoanStatus.REPAYING, LoanStatus.APPROVED);
 
-                totalBorrowed = totalBorrowed.add(loan.getAmount());
-                totalRepaid = totalRepaid.add(loan.getTotalRepaid() != null ? loan.getTotalRepaid() : BigDecimal.ZERO);
-                activeLoansCount++;
-                monthlyPayment = monthlyPayment.add(loan.getMonthlyPayment() != null ? loan.getMonthlyPayment() : BigDecimal.ZERO);
-
-                List<Repayment> pendingRepayments = repaymentRepository.findByLoanIdAndStatus(loan.getId(), Repayment.RepaymentStatus.PENDING);
-                pendingDue += pendingRepayments.size();
+        for (Loan l : userLoans) {
+            if (activeStatuses.contains(l.getStatus())) {
+                borrowed = borrowed.add(l.getAmount());
+                repaid = repaid.add(l.getTotalRepaid() != null ? l.getTotalRepaid() : BigDecimal.ZERO);
+                monthly = monthly.add(l.getMonthlyPayment());
+                active++;
             }
         }
 
-        LoanDTO.Summary summary = new LoanDTO.Summary();
-        summary.setTotalBorrowed(totalBorrowed);
-        summary.setTotalRepaid(totalRepaid);
-        summary.setActiveLoans(activeLoansCount);
-        summary.setPendingDue(pendingDue);
-        summary.setMonthlyPayment(monthlyPayment);
-        summary.setAvailableCredit(BigDecimal.valueOf(100000).subtract(totalBorrowed).max(BigDecimal.ZERO));
-
-        return summary;
-    }
-
-    // ================== CALCULATION UTILITIES ==================
-
-    private BigDecimal calculateInterestRate(Integer creditScore, Integer termMonths) {
-        BigDecimal baseRate = BigDecimal.valueOf(6.5);
-        BigDecimal scoreAdj = (creditScore >= 750) ? BigDecimal.valueOf(-2.0) :
-                (creditScore >= 700) ? BigDecimal.valueOf(-1.0) :
-                        (creditScore >= 600) ? BigDecimal.valueOf(1.5) : BigDecimal.valueOf(3.0);
-
-        BigDecimal termAdj = (termMonths > 60) ? BigDecimal.valueOf(1.0) :
-                (termMonths > 36) ? BigDecimal.valueOf(0.5) : BigDecimal.ZERO;
-
-        return baseRate.add(scoreAdj).add(termAdj);
-    }
-
-    private BigDecimal calculateMonthlyPayment(BigDecimal principal, BigDecimal annualRate, Integer months) {
-        if (months == 0) return principal;
-        BigDecimal monthlyRate = annualRate.divide(BigDecimal.valueOf(1200), 10, RoundingMode.HALF_UP);
-        BigDecimal pow = BigDecimal.ONE.add(monthlyRate).pow(months);
-        return principal.multiply(monthlyRate.multiply(pow)
-                        .divide(pow.subtract(BigDecimal.ONE), 10, RoundingMode.HALF_UP))
-                .setScale(2, RoundingMode.HALF_UP);
-    }
-
-    private void generateRepaymentSchedule(Loan loan) {
-        List<Repayment> repayments = new ArrayList<>();
-        for (int i = 1; i <= loan.getTermMonths(); i++) {
-            Repayment r = new Repayment();
-            r.setLoan(loan);
-            r.setInstallmentNumber(i);
-            r.setAmount(loan.getMonthlyPayment());
-            r.setDueDate(LocalDate.now().plusMonths(i));
-            r.setStatus(Repayment.RepaymentStatus.PENDING);
-            repayments.add(r);
-        }
-        repaymentRepository.saveAll(repayments);
+        return LoanDTO.Summary.builder()
+                .totalBorrowed(borrowed)
+                .totalRepaid(repaid)
+                .activeLoans(active)
+                .monthlyPayment(monthly)
+                .availableCredit(BigDecimal.valueOf(100000).subtract(borrowed).max(BigDecimal.ZERO))
+                .build();
     }
 }

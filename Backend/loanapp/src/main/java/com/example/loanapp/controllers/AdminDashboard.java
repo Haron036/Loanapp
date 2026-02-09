@@ -1,6 +1,7 @@
 package com.example.loanapp.controllers;
 
 import com.example.loanapp.Entity.User;
+import com.example.loanapp.Entity.Loan.LoanStatus; // Import the Enum
 import com.example.loanapp.Repository.LoanRepository;
 import com.example.loanapp.Repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -9,29 +10,32 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
+
 @RestController
 @RequestMapping("/api/admin/dashboard")
 @RequiredArgsConstructor
 @PreAuthorize("hasRole('ADMIN')")
-
 public class AdminDashboard {
+
     private final UserRepository userRepository;
     private final LoanRepository loanRepository;
 
     /**
      * 📊 Dashboard statistics
+     * Updated to use type-safe Enums and optimized repository counts
      */
     @GetMapping("/stats")
     public ResponseEntity<?> getStats() {
-
+        // User Stats
         long totalUsers = userRepository.count();
         long admins = userRepository.countByRole(User.Role.ADMIN);
         long normalUsers = userRepository.countByRole(User.Role.USER);
 
+        // Loan Stats - Using the Enum constants to fix the "Incompatible Types" error
         long totalLoans = loanRepository.count();
-        long pendingLoans = loanRepository.countByStatus("PENDING");
-        long approvedLoans = loanRepository.countByStatus("APPROVED");
-        long rejectedLoans = loanRepository.countByStatus("REJECTED");
+        long pendingLoans = loanRepository.countByStatus(LoanStatus.PENDING);
+        long approvedLoans = loanRepository.countByStatus(LoanStatus.APPROVED);
+        long rejectedLoans = loanRepository.countByStatus(LoanStatus.REJECTED);
 
         return ResponseEntity.ok(
                 Map.of(
@@ -63,10 +67,9 @@ public class AdminDashboard {
      */
     @GetMapping("/users/{id}")
     public ResponseEntity<?> getUser(@PathVariable String id) {
-        return ResponseEntity.ok(
-                userRepository.findById(id)
-                        .orElseThrow(() -> new RuntimeException("User not found"))
-        );
+        return userRepository.findById(id)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
     }
 
     /**
@@ -74,14 +77,13 @@ public class AdminDashboard {
      */
     @PutMapping("/users/{id}/lock")
     public ResponseEntity<?> lockUser(@PathVariable String id) {
-
-        User user = userRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("User not found"));
-
-        user.setAccountNonLocked(false);
-        userRepository.save(user);
-
-        return ResponseEntity.ok("User account locked");
+        return userRepository.findById(id)
+                .map(user -> {
+                    user.setAccountNonLocked(false);
+                    userRepository.save(user);
+                    return ResponseEntity.ok(Map.of("message", "User account locked"));
+                })
+                .orElse(ResponseEntity.notFound().build());
     }
 
     /**
@@ -89,13 +91,12 @@ public class AdminDashboard {
      */
     @PutMapping("/users/{id}/unlock")
     public ResponseEntity<?> unlockUser(@PathVariable String id) {
-
-        User user = userRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("User not found"));
-
-        user.setAccountNonLocked(true);
-        userRepository.save(user);
-
-        return ResponseEntity.ok("User account unlocked");
+        return userRepository.findById(id)
+                .map(user -> {
+                    user.setAccountNonLocked(true);
+                    userRepository.save(user);
+                    return ResponseEntity.ok(Map.of("message", "User account unlocked"));
+                })
+                .orElse(ResponseEntity.notFound().build());
     }
 }

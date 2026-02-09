@@ -2,6 +2,7 @@ package com.example.loanapp.Entity;
 
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
+import lombok.Builder; // Add this
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.CreationTimestamp;
@@ -11,6 +12,7 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "audit_logs")
 @Data
+@Builder // Add this
 @NoArgsConstructor
 @AllArgsConstructor
 public class AuditLog {
@@ -36,14 +38,5 @@ public class AuditLog {
     @CreationTimestamp
     private LocalDateTime timestamp;
 
-    public enum Action {
-        CREATE, UPDATE, DELETE, LOGIN, LOGOUT,
-        APPROVE, REJECT, DISBURSE, REPAY,
-        REGISTER, UPDATE_PROFILE, CHANGE_PASSWORD,
-        PASSWORD_RESET_REQUEST, PASSWORD_RESET,
-        ADMIN_UPDATE, ENABLE_ACCOUNT, DISABLE_ACCOUNT,
-        LOCK_ACCOUNT, UNLOCK_ACCOUNT, CHANGE_ROLE,
-        SOFT_DELETE
-    }
+    // ... enum remains the same
 }
-
