@@ -57,17 +57,27 @@ export const userApi = {
 };
 
 // ==========================
-// LOAN API
+// LOAN & REPAYMENT API
 // ==========================
 export const loanApi = {
   create: (loanData) => api.post('/loans/apply', loanData),
-  // Matches your RepaymentController: @RequestMapping("/api/repayments")
-  payInstallment: (repaymentId, data) => api.post(`/repayments/${repaymentId}/pay`, data),
   getUserLoans: (page = 0, size = 10) => api.get('/loans/my-loans', { params: { page, size } }),
   getById: (id) => api.get(`/loans/${id}`),
   getSummary: () => api.get('/loans/summary'),
   getRepayments: (loanId) => api.get(`/loans/${loanId}/repayments`),
-  
+
+  /**
+   * Processes a payment for a specific installment ID.
+   * Matches: POST /api/repayments/{id}/pay
+   */
+  payInstallment: (repaymentId, data) => api.post(`/repayments/${repaymentId}/pay`, data),
+
+  /**
+   * Flexible repayment (custom amount) for a specific loan.
+   * FIXED: Matches POST /api/repayments/loan/{loanId}/repay
+   */
+  flexibleRepay: (loanId, data) => api.post(`/repayments/loan/${loanId}/repay`, data),
+
   // ADMIN ACTIONS
   approve: (id, data) => api.put(`/loans/${id}/approve`, data), 
   reject: (id, data) => api.put(`/loans/${id}/reject`, data),
