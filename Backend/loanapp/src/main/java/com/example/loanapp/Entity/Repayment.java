@@ -1,6 +1,6 @@
 package com.example.loanapp.Entity;
 
-import com.fasterxml.jackson.annotation.JsonIgnore; // Added import
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -23,7 +23,7 @@ public class Repayment {
     @GeneratedValue(strategy = GenerationType.UUID)
     private String id;
 
-    @JsonIgnore // FIX: Prevents infinite recursion when serializing to JSON
+    @JsonIgnore // Prevents infinite recursion during JSON serialization
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "loan_id", nullable = false)
     private Loan loan;
@@ -39,17 +39,29 @@ public class Repayment {
 
     private LocalDate paidDate;
 
+    @Builder.Default
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private RepaymentStatus status = RepaymentStatus.PENDING;
 
+    @Builder.Default
     @Column(precision = 12, scale = 2)
     private BigDecimal lateFee = BigDecimal.ZERO;
 
-    private String paymentMethod;
-    private String transactionId;
+    private String paymentMethod; // e.g., "WALLET", "MPESA"
+
+    private String transactionId; // The M-Pesa Receipt Number (e.g., RBT123456)
+
+    /**
+     * M-Pesa Specific Field:
+     * Stores the CheckoutRequestID from the STK Push response.
+     * Used to identify this record when the asynchronous callback arrives.
+     */
+    @Column(name = "mpesa_checkout_id")
+    private String mpesaCheckoutId;
 
     @CreationTimestamp
+    @Column(updatable = false)
     private LocalDateTime createdAt;
 
     @UpdateTimestamp

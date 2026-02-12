@@ -5,19 +5,20 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
-import lombok.Builder; // Added
+import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 
 public class LoanDTO {
 
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
-    @Builder // Added for convenience
+    @Builder
     public static class CreateRequest {
         @NotNull
         @DecimalMin(value = "1000.00")
@@ -48,7 +49,7 @@ public class LoanDTO {
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
-    @Builder // Highly recommended for entity-to-dto mapping
+    @Builder
     public static class Response {
         private String id;
         private BigDecimal amount;
@@ -67,6 +68,27 @@ public class LoanDTO {
         private BigDecimal remainingBalance;
         private LocalDate dueDate;
         private LocalDate completedDate;
+
+        // CRITICAL: This allows the dashboard to see and pay installments
+        private List<RepaymentDTO> repayments;
+    }
+
+    /**
+     * Nested Repayment DTO for the schedule view
+     */
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class RepaymentDTO {
+        private String id;
+        private String loanId;
+        private Integer installmentNumber;
+        private BigDecimal amount;
+        private LocalDate dueDate;
+        private String status; // PENDING, PAID, OVERDUE
+        private LocalDate paidDate;
+        private String paymentMethod;
     }
 
     @Data

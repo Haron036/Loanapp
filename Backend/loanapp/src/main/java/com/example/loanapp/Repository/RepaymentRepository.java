@@ -14,6 +14,14 @@ import java.util.Optional;
 @Repository
 public interface RepaymentRepository extends JpaRepository<Repayment, String> {
 
+    // --- M-Pesa Integration ---
+    /**
+     * Finds a repayment by the M-Pesa CheckoutRequestID.
+     * Essential for processing asynchronous STK Push callbacks.
+     */
+    Optional<Repayment> findByMpesaCheckoutId(String mpesaCheckoutId);
+
+    // --- Existing Queries ---
     List<Repayment> findByLoanIdAndStatus(String loanId, Repayment.RepaymentStatus status);
 
     List<Repayment> findByLoanIdOrderByDueDateAsc(String loanId);

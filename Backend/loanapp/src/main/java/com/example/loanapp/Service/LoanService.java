@@ -20,7 +20,10 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -44,13 +47,13 @@ public class LoanService {
         this.notificationService = notificationService;
     }
 
-    // --- Core Business Logic ---
+    // --- 👤 User Endpoints ---
 
     @Transactional
     public LoanDTO.Response createLoan(String userEmail, LoanDTO.CreateRequest request) {
-        // Get user by email instead of ID
         User user = userService.getUserEntityByEmail(userEmail);
 
+        // Check active loan limits
         List<LoanStatus> activeStatuses = List.of(LoanStatus.APPROVED, LoanStatus.DISBURSED, LoanStatus.REPAYING);
         long activeCount = loanRepository.findByUserId(user.getId()).stream()
                 .filter(l -> activeStatuses.contains(l.getStatus()))
@@ -80,9 +83,49 @@ public class LoanService {
         Loan savedLoan = loanRepository.save(loan);
         notificationService.sendLoanApplicationNotification(user, savedLoan);
 
-        log.info("Loan created for user {}: {}", user.getEmail(), savedLoan.getId());
+        log.info("New loan application submitted by {}: Loan ID {}", userEmail, savedLoan.getId());
         return convertToResponse(savedLoan);
     }
+
+    /**
+     * Resolves the 404 in Controller and populates Dashboard Stats.
+     */
+    public LoanDTO.Summary getUserLoanSummary(String email) {
+        User user = userService.getUserEntityByEmail(email);
+        List<Loan> loans = loanRepository.findByUserId(user.getId());
+
+        BigDecimal borrowed = BigDecimal.ZERO;
+        BigDecimal repaid = BigDecimal.ZERO;
+        BigDecimal monthly = BigDecimal.ZERO;
+
+        List<Loan.LoanStatus> activeStatuses = List.of(
+                Loan.LoanStatus.APPROVED,
+                Loan.LoanStatus.DISBURSED,
+                Loan.LoanStatus.REPAYING
+        );
+
+        int activeCount = 0;
+        for (Loan l : loans) {
+            if (activeStatuses.contains(l.getStatus())) {
+                borrowed = borrowed.add(l.getAmount());
+                repaid = repaid.add(l.getTotalRepaid() != null ? l.getTotalRepaid() : BigDecimal.ZERO);
+                monthly = monthly.add(l.getMonthlyPayment() != null ? l.getMonthlyPayment() : BigDecimal.ZERO);
+                activeCount++;
+            }
+        }
+
+        // Return the actual DTO instead of a Map
+        return LoanDTO.Summary.builder()
+                .totalBorrowed(borrowed)
+                .totalRepaid(repaid)
+                .activeLoans(activeCount)
+                .monthlyPayment(monthly)
+
+                .availableCredit(BigDecimal.valueOf(100000).subtract(borrowed).max(BigDecimal.ZERO))
+                .pendingDue(0)
+                .build();
+    }
+    // --- 🛠️ Admin/Officer Endpoints ---
 
     @Transactional
     public LoanDTO.Response approveLoan(String loanId, String adminId, String notes) {
@@ -129,6 +172,7 @@ public class LoanService {
         loan.setStatus(LoanStatus.DISBURSED);
         loan.setDisbursedDate(LocalDate.now());
 
+        // Update repayment dates based on actual disbursement
         List<Repayment> schedule = repaymentRepository.findByLoanIdOrderByDueDateAsc(loanId);
         for (int i = 0; i < schedule.size(); i++) {
             schedule.get(i).setDueDate(LocalDate.now().plusMonths(i + 1));
@@ -160,7 +204,12 @@ public class LoanService {
                 .orElseThrow(() -> new ResourceNotFoundException("Loan not found: " + id));
     }
 
+    /**
+     * Maps Entity to DTO and includes Repayment details for the Frontend.
+     */
     private LoanDTO.Response convertToResponse(Loan loan) {
+        List<Repayment> repayments = repaymentRepository.findByLoanIdOrderByDueDateAsc(loan.getId());
+
         return LoanDTO.Response.builder()
                 .id(loan.getId())
                 .amount(loan.getAmount())
@@ -177,20 +226,39 @@ public class LoanService {
                 .userName(loan.getUser().getName())
                 .totalRepaid(loan.getTotalRepaid())
                 .dueDate(loan.getDueDate())
+                // Ensure repayments are passed so the Dashboard "Pay Now" logic triggers
+                .repayments(repayments != null ? repayments.stream()
+                        .map(this::mapToRepaymentDTO)
+                        .collect(Collectors.toList()) : new ArrayList<>())
+                .build();
+    }
+
+    private LoanDTO.RepaymentDTO mapToRepaymentDTO(Repayment repayment) {
+        return LoanDTO.RepaymentDTO.builder()
+                .id(repayment.getId())
+                .loanId(repayment.getLoan().getId())
+                .installmentNumber(repayment.getInstallmentNumber())
+                .amount(repayment.getAmount())
+                .dueDate(repayment.getDueDate())
+                .status(repayment.getStatus().name())
+                .paidDate(repayment.getPaidDate())
                 .build();
     }
 
     private BigDecimal calculateInterestRate(Integer score, Integer months) {
-        double base = 10.0;
-        if (score >= 750) base -= 3.0;
+        double base = 12.0; // Slightly higher default base
+        if (score >= 750) base -= 4.0;
+        else if (score >= 650) base -= 2.0;
         if (months > 36) base += 2.0;
         return BigDecimal.valueOf(base);
     }
 
-    private BigDecimal calculateMonthlyPayment(BigDecimal p, BigDecimal rate, int months) {
-        BigDecimal mRate = rate.divide(BigDecimal.valueOf(1200), 10, RoundingMode.HALF_UP);
-        BigDecimal factor = BigDecimal.ONE.add(mRate).pow(months);
-        return p.multiply(mRate.multiply(factor))
+    private BigDecimal calculateMonthlyPayment(BigDecimal principal, BigDecimal annualRate, int months) {
+        // Amortization Formula: [P * r * (1 + r)^n] / [(1 + r)^n – 1]
+        BigDecimal monthlyRate = annualRate.divide(BigDecimal.valueOf(1200), 10, RoundingMode.HALF_UP);
+        BigDecimal factor = BigDecimal.ONE.add(monthlyRate).pow(months);
+
+        return principal.multiply(monthlyRate.multiply(factor))
                 .divide(factor.subtract(BigDecimal.ONE), 2, RoundingMode.HALF_UP);
     }
 
@@ -206,34 +274,6 @@ public class LoanService {
                     .build());
         }
         repaymentRepository.saveAll(schedule);
-    }
-
-    public LoanDTO.Summary getUserLoanSummary(String userEmail) {
-        User user = userService.getUserEntityByEmail(userEmail);
-        List<Loan> userLoans = loanRepository.findByUserId(user.getId());
-
-        BigDecimal borrowed = BigDecimal.ZERO;
-        BigDecimal repaid = BigDecimal.ZERO;
-        BigDecimal monthly = BigDecimal.ZERO;
-        int active = 0;
-
-        List<LoanStatus> activeStatuses = List.of(LoanStatus.DISBURSED, LoanStatus.REPAYING, LoanStatus.APPROVED);
-
-        for (Loan l : userLoans) {
-            if (activeStatuses.contains(l.getStatus())) {
-                borrowed = borrowed.add(l.getAmount());
-                repaid = repaid.add(l.getTotalRepaid() != null ? l.getTotalRepaid() : BigDecimal.ZERO);
-                monthly = monthly.add(l.getMonthlyPayment());
-                active++;
-            }
-        }
-
-        return LoanDTO.Summary.builder()
-                .totalBorrowed(borrowed)
-                .totalRepaid(repaid)
-                .activeLoans(active)
-                .monthlyPayment(monthly)
-                .availableCredit(BigDecimal.valueOf(100000).subtract(borrowed).max(BigDecimal.ZERO))
-                .build();
+        log.info("Generated schedule for Loan ID {}: {} installments", loan.getId(), loan.getTermMonths());
     }
 }

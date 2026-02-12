@@ -45,39 +45,44 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                // Disable CSRF for APIs and enable CORS
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-
-                // --- Authorization rules ---
                 .authorizeHttpRequests(auth -> auth
-                        // Public endpoints
+                        // 1. Public endpoints (Safaricom Callbacks must be here!)
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers(
                                 "/api/auth/**",
                                 "/error",
                                 "/v3/api-docs/**",
-                                "/swagger-ui/**"
+                                "/swagger-ui/**",
+                                "/api/admin/register",
+                                "/api/repayments/mpesa-callback" // CRITICAL: Allow M-Pesa to hit this without a token
                         ).permitAll()
-                        .requestMatchers("/api/admin/register").permitAll()
 
-                        // User endpoints
-                        .requestMatchers(HttpMethod.POST, "/api/loans").hasRole("USER")
+                        // 2. User Loan Actions
+                        .requestMatchers(HttpMethod.POST, "/api/loans/apply").hasRole("USER")
                         .requestMatchers(HttpMethod.GET, "/api/loans/my-loans").hasRole("USER")
-                        .requestMatchers("/api/users/**").hasRole("USER")
+                        .requestMatchers(HttpMethod.GET, "/api/loans/summary").hasRole("USER")
 
-                        // Admin/Loan Officer endpoints
+                        // 3. Shared Access
+                        .requestMatchers(HttpMethod.GET, "/api/loans/{id}").hasAnyRole("USER", "ADMIN", "LOAN_OFFICER")
+
+                        // 4. Secure Repayment Actions (Initiating payment requires USER role)
+                        .requestMatchers("/api/repayments/{id}/pay").hasRole("USER")
+                        .requestMatchers(HttpMethod.GET, "/api/repayments/**").hasAnyRole("USER", "ADMIN")
+
+                        // 5. Profile & Admin restricted
+                        .requestMatchers("/api/users/**").hasRole("USER")
                         .requestMatchers("/api/analytics/**").hasAnyRole("ADMIN", "LOAN_OFFICER")
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
-                        .requestMatchers(HttpMethod.GET, "/api/loans/**").hasAnyRole("ADMIN", "LOAN_OFFICER")
-                        .requestMatchers(HttpMethod.PUT, "/api/loans/**").hasAnyRole("ADMIN", "LOAN_OFFICER")
 
-                        // All other endpoints require authentication
+                        // 6. Broad Loan Management
+                        .requestMatchers(HttpMethod.PUT, "/api/loans/**").hasAnyRole("ADMIN", "LOAN_OFFICER")
+                        .requestMatchers(HttpMethod.GET, "/api/loans/**").hasAnyRole("ADMIN", "LOAN_OFFICER")
+
                         .anyRequest().authenticated()
                 )
-
-                // Exception handling
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint((req, res, e) -> {
                             res.setStatus(401);
@@ -90,8 +95,6 @@ public class SecurityConfig {
                             res.getWriter().write("{\"error\":\"Forbidden\"}");
                         })
                 )
-
-                // Add JWT filter
                 .authenticationProvider(authenticationProvider())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
@@ -101,17 +104,15 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
+        // Added ngrok origin to CORS just in case you test via web interface
         config.setAllowedOrigins(List.of(
                 "http://localhost:5173",
                 "http://localhost:3000",
-                "http://127.0.0.1:5173"
+                "http://127.0.0.1:5173",
+                "https://2fa0-102-68-79-201.ngrok-free.app"
         ));
-        config.setAllowedMethods(Arrays.asList(
-                "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"
-        ));
-        config.setAllowedHeaders(Arrays.asList(
-                "Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"
-        ));
+        config.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        config.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"));
         config.setExposedHeaders(List.of("Authorization"));
         config.setAllowCredentials(true);
         config.setMaxAge(3600L);

@@ -4,7 +4,6 @@ import com.example.loanapp.DTO.AuthDTO;
 import com.example.loanapp.DTO.LoanDTO;
 import com.example.loanapp.DTO.UserDTO;
 import com.example.loanapp.Entity.AuditLog;
-import com.example.loanapp.Entity.Loan;
 import com.example.loanapp.Entity.Loan.LoanStatus;
 import com.example.loanapp.Entity.User;
 import com.example.loanapp.Exception.ResourceNotFoundException;
@@ -14,8 +13,8 @@ import com.example.loanapp.Repository.LoanRepository;
 import com.example.loanapp.Repository.RepaymentRepository;
 import com.example.loanapp.Repository.UserRepository;
 import jakarta.transaction.Transactional;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -33,7 +32,6 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class UserService implements UserDetailsService {
 
     private final UserRepository userRepository;
@@ -45,17 +43,30 @@ public class UserService implements UserDetailsService {
     private final EmailService emailService;
     private final LoanService loanService;
 
+    // Use Constructor Injection with @Lazy to solve the Circular Dependency
+    public UserService(UserRepository userRepository,
+                       LoanRepository loanRepository,
+                       RepaymentRepository repaymentRepository,
+                       AuditLogRepository auditLogRepository,
+                       PasswordEncoder passwordEncoder,
+                       CreditScoreService creditScoreService,
+                       EmailService emailService,
+                       @Lazy LoanService loanService) {
+        this.userRepository = userRepository;
+        this.loanRepository = loanRepository;
+        this.repaymentRepository = repaymentRepository;
+        this.auditLogRepository = auditLogRepository;
+        this.passwordEncoder = passwordEncoder;
+        this.creditScoreService = creditScoreService;
+        this.emailService = emailService;
+        this.loanService = loanService;
+    }
+
     // --- Authentication ---
     @Override
     public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
-        User user = getUserEntityByEmail(email);
-        return new org.springframework.security.core.userdetails.User(
-                user.getEmail(),
-                user.getPassword(),
-                List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority(
-                        "ROLE_" + user.getRole().name()
-                ))
-        );
+        // User entity already implements UserDetails
+        return getUserEntityByEmail(email);
     }
 
     // --- Registration & Admin Creation ---
@@ -123,13 +134,15 @@ public class UserService implements UserDetailsService {
     // --- Profile & Admin Views ---
     public UserDTO.ProfileResponse getUserProfile(String email) {
         User user = getUserEntityByEmail(email);
-        LoanDTO.Summary loanSummary = loanService.getUserLoanSummary(user.getId());
+
+        // FIX: Match method name in LoanService and use email instead of ID
+        LoanDTO.Summary loanSummary = loanService.getUserLoanSummary(user.getEmail());
 
         List<UserDTO.ActivityDTO> activities = auditLogRepository.findRecentByUserId(user.getId(), Pageable.ofSize(10))
                 .stream()
-                .map(log -> new UserDTO.ActivityDTO(
-                        log.getId().toString(), log.getAction(), log.getDetails(),
-                        log.getEntityType(), log.getEntityId(), log.getTimestamp(), log.getIpAddress()))
+                .map(logEntry -> new UserDTO.ActivityDTO(
+                        logEntry.getId().toString(), logEntry.getAction(), logEntry.getDetails(),
+                        logEntry.getEntityType(), logEntry.getEntityId(), logEntry.getTimestamp(), logEntry.getIpAddress()))
                 .collect(Collectors.toList());
 
         return UserDTO.convertToProfileResponse(user, loanSummary, activities);
