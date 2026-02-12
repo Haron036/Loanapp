@@ -1,7 +1,6 @@
 package com.example.loanapp.Service;
 
 import com.example.loanapp.Entity.Loan;
-import com.example.loanapp.Entity.Loan.LoanStatus;
 import com.example.loanapp.Entity.Repayment;
 import com.example.loanapp.Entity.Repayment.RepaymentStatus;
 import com.example.loanapp.Exception.ResourceNotFoundException;
@@ -14,7 +13,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Service
@@ -26,7 +25,7 @@ public class RepaymentService {
     private final MpesaService mpesaService;
 
     /**
-     * Processes a payment or initiates an M-Pesa STK Push.
+     * Processes a payment for a specific pre-existing installment.
      */
     @Transactional
     public Repayment processPayment(String repaymentId, String paymentMethod) {
@@ -38,98 +37,158 @@ public class RepaymentService {
         }
 
         if ("MPESA".equalsIgnoreCase(paymentMethod)) {
-            // 1. Sanitize the phone number to 254XXXXXXXXX format
+            return initiateMpesaFlow(repayment);
+        }
+
+        // Handle other methods (e.g., WALLET) immediately
+        return finalizePayment(repayment, paymentMethod);
+    }
+
+    /**
+     * Processes a flexible (custom amount) payment for a loan.
+     * Fixes the "not-null property references a null" error by providing an installmentNumber.
+     */
+    @Transactional
+    public Repayment processFlexiblePayment(String loanId, BigDecimal amount, String paymentMethod) {
+        Loan loan = loanRepository.findById(loanId)
+                .orElseThrow(() -> new ResourceNotFoundException("Loan not found"));
+
+        // Validation Logic
+        validateFlexiblePayment(loan, amount);
+
+        // Create the repayment record
+        // FIX: Added installmentNumber(0) to satisfy database constraints for ad-hoc payments
+        Repayment repayment = Repayment.builder()
+                .loan(loan)
+                .amount(amount)
+                .dueDate(LocalDate.now())
+                .installmentNumber(0)
+                .status(RepaymentStatus.PENDING)
+                .paymentMethod(paymentMethod)
+                .build();
+
+        // Save first to generate the ID required for the M-Pesa metadata
+        repayment = repaymentRepository.save(repayment);
+
+        if ("MPESA".equalsIgnoreCase(paymentMethod)) {
+            return initiateMpesaFlow(repayment);
+        }
+
+        return finalizePayment(repayment, paymentMethod);
+    }
+
+    /**
+     * Internal helper to handle M-Pesa STK Push initiation for any repayment type.
+     */
+    private Repayment initiateMpesaFlow(Repayment repayment) {
+        try {
             String rawPhone = repayment.getLoan().getUser().getPhone();
             String formattedPhone = formatMpesaPhoneNumber(rawPhone);
 
             log.info("Initiating M-Pesa push for {} - Amount: {}", formattedPhone, repayment.getAmount());
 
-            // 2. Trigger STK Push via MpesaService
-            try {
-                String checkoutId = mpesaService.initiateStkPush(formattedPhone, repayment.getAmount(), repaymentId);
+            String checkoutId = mpesaService.initiateStkPush(
+                    formattedPhone,
+                    repayment.getAmount(),
+                    repayment.getId()
+            );
 
-                if (checkoutId != null) {
-                    repayment.setMpesaCheckoutId(checkoutId);
-                    // Note: We do NOT mark as PAID here. We wait for the callback.
-                    return repaymentRepository.save(repayment);
-                } else {
-                    throw new RuntimeException("Daraja API returned a null CheckoutID. Check backend logs.");
-                }
-            } catch (Exception e) {
-                log.error("M-Pesa Service Error: {}", e.getMessage());
-                throw new RuntimeException("M-Pesa Communication Error: " + e.getMessage());
+            if (checkoutId == null) {
+                throw new RuntimeException("M-Pesa gateway failed to return a CheckoutID.");
             }
-        }
 
-        // Standard logic for immediate payments (e.g. WALLET)
-        return finalizePayment(repayment, paymentMethod);
+            repayment.setMpesaCheckoutId(checkoutId);
+            return repaymentRepository.save(repayment);
+        } catch (Exception e) {
+            log.error("M-Pesa Service Error: {}", e.getMessage());
+            throw new RuntimeException("Could not initiate M-Pesa payment: " + e.getMessage());
+        }
     }
 
     /**
-     * Sanitizes phone numbers to the strict format required by Safaricom.
-     * Converts: 0712345678 -> 254712345678
-     * Converts: +254712345678 -> 254712345678
-     */
-    private String formatMpesaPhoneNumber(String phone) {
-        if (phone == null || phone.isEmpty()) {
-            throw new IllegalArgumentException("User phone number is missing.");
-        }
-        // Remove all non-numeric characters (spaces, +, dashes)
-        String clean = phone.replaceAll("[^0-9]", "");
-
-        if (clean.startsWith("0")) {
-            return "254" + clean.substring(1);
-        } else if (clean.startsWith("254")) {
-            return clean;
-        } else if (clean.length() == 9) { // handles 712345678
-            return "254" + clean;
-        }
-
-        return clean;
-    }
-
-    /**
-     * Finalizes the payment after successful M-Pesa callback or Wallet deduction.
+     * Finalizes the payment after successful M-Pesa callback or internal deduction.
      */
     @Transactional
     public void completeMpesaPayment(String checkoutRequestId) {
         Repayment repayment = repaymentRepository.findByMpesaCheckoutId(checkoutRequestId)
-                .orElseThrow(() -> new ResourceNotFoundException("No repayment found for CheckoutID: " + checkoutRequestId));
+                .orElseThrow(() -> new ResourceNotFoundException("No record found for CheckoutID: " + checkoutRequestId));
 
         if (repayment.getStatus() != RepaymentStatus.PAID) {
             finalizePayment(repayment, "MPESA");
-            log.info("M-Pesa payment CONFIRMED and marked as PAID for ID: {}", repayment.getId());
+            log.info("M-Pesa payment CONFIRMED for Repayment ID: {}", repayment.getId());
         }
     }
 
+    /**
+     * Logic to update statuses and loan progress once money is confirmed.
+     */
     private Repayment finalizePayment(Repayment repayment, String paymentMethod) {
         repayment.setStatus(RepaymentStatus.PAID);
         repayment.setPaidDate(LocalDate.now());
         repayment.setPaymentMethod(paymentMethod);
-        Repayment savedRepayment = repaymentRepository.save(repayment);
 
-        updateLoanProgress(repayment.getLoan().getId(), repayment.getAmount());
+        Repayment savedRepayment = repaymentRepository.save(repayment);
+        updateLoanProgress(repayment.getLoan(), repayment.getAmount());
+
         return savedRepayment;
     }
 
-    private void updateLoanProgress(String loanId, BigDecimal paymentAmount) {
-        Loan loan = loanRepository.findById(loanId)
-                .orElseThrow(() -> new ResourceNotFoundException("Associated loan not found."));
+    /**
+     * Updates the total repaid amount on the loan and checks for completion.
+     */
+    private void updateLoanProgress(Loan loan, BigDecimal paymentAmount) {
+        BigDecimal totalPayable = loan.getAmount().add(
+                loan.getAmount().multiply(loan.getInterestRate().divide(BigDecimal.valueOf(100)))
+        );
 
-        BigDecimal currentRepaid = loan.getTotalRepaid() != null ? loan.getTotalRepaid() : BigDecimal.ZERO;
-        loan.setTotalRepaid(currentRepaid.add(paymentAmount));
+        BigDecimal currentTotalRepaid = loan.getTotalRepaid() != null ? loan.getTotalRepaid() : BigDecimal.ZERO;
+        BigDecimal newTotalRepaid = currentTotalRepaid.add(paymentAmount);
 
-        List<Repayment> allRepayments = repaymentRepository.findByLoanIdOrderByDueDateAsc(loanId);
-        boolean isFullyPaid = allRepayments.stream()
-                .allMatch(r -> r.getStatus() == RepaymentStatus.PAID);
+        loan.setTotalRepaid(newTotalRepaid);
 
-        if (isFullyPaid) {
-            loan.setStatus(LoanStatus.COMPLETED);
+        if (newTotalRepaid.compareTo(totalPayable) >= 0) {
+            loan.setStatus(Loan.LoanStatus.COMPLETED);
             loan.setCompletedDate(LocalDate.now());
         } else {
-            loan.setStatus(LoanStatus.REPAYING);
+            loan.setStatus(Loan.LoanStatus.REPAYING);
         }
 
         loanRepository.save(loan);
+    }
+
+    /**
+     * Validates if a flexible payment is allowed.
+     */
+    private void validateFlexiblePayment(Loan loan, BigDecimal amount) {
+        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Payment amount must be greater than zero.");
+        }
+
+        BigDecimal totalPayable = loan.getAmount().add(
+                loan.getAmount().multiply(loan.getInterestRate().divide(BigDecimal.valueOf(100)))
+        );
+        BigDecimal remainingBalance = totalPayable.subtract(
+                loan.getTotalRepaid() != null ? loan.getTotalRepaid() : BigDecimal.ZERO
+        );
+
+        if (amount.compareTo(remainingBalance) > 0) {
+            throw new IllegalArgumentException("Amount exceeds remaining balance: " + remainingBalance);
+        }
+    }
+
+    /**
+     * Ensures phone numbers are in the format: 2547XXXXXXXX
+     */
+    private String formatMpesaPhoneNumber(String phone) {
+        if (phone == null || phone.isBlank()) {
+            throw new IllegalArgumentException("Phone number is required for M-Pesa.");
+        }
+        String clean = phone.replaceAll("[^0-9]", "");
+
+        if (clean.startsWith("0")) return "254" + clean.substring(1);
+        if (clean.startsWith("254")) return clean;
+        if (clean.length() == 9) return "254" + clean;
+
+        return clean;
     }
 }

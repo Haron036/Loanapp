@@ -8,6 +8,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.util.Map;
 
 @Slf4j
@@ -41,6 +42,27 @@ public class RepaymentController {
                     .body(Map.of("message", e.getMessage()));
         }
     }
+
+    @PostMapping("/loan/{loanId}/repay")
+    public ResponseEntity<?> repayLoan(
+            @PathVariable String loanId,
+            @RequestBody Map<String, Object> request
+    ) {
+        try {
+            BigDecimal amount = new BigDecimal(request.get("amount").toString());
+            String method = request.getOrDefault("paymentMethod", "WALLET").toString();
+
+            // Calls new service method for flexible repayment
+            Repayment repayment = repaymentService.processFlexiblePayment(loanId, amount, method);
+
+            return ResponseEntity.ok(repayment);
+        } catch (Exception e) {
+            log.error("Flexible repayment error: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("message", e.getMessage()));
+        }
+    }
+
 
     /**
      * M-Pesa Callback Endpoint
