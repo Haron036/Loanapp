@@ -1,22 +1,35 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { authApi } from './api';
 
 const AuthContext = createContext(undefined);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(() => {
-    const storedUser = localStorage.getItem('lendwise_user');
-    const token = localStorage.getItem('token');
-    if (storedUser && token) {
-      try { return JSON.parse(storedUser); } catch { return null; }
-    }
-    return null;
-  });
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true); // Track the initial session check
+
+  // Initialize auth state from storage on mount
+  useEffect(() => {
+    const initAuth = () => {
+      const storedUser = localStorage.getItem('lendwise_user');
+      const token = localStorage.getItem('token');
+      
+      if (storedUser && token) {
+        try {
+          setUser(JSON.parse(storedUser));
+        } catch (error) {
+          console.error("Failed to parse stored user", error);
+          localStorage.clear();
+        }
+      }
+      setLoading(false);
+    };
+
+    initAuth();
+  }, []);
 
   const login = useCallback(async (email, password) => {
     try {
       const { data } = await authApi.login({ email, password });
-      // The backend now returns role as "ROLE_ADMIN" or "ROLE_USER"
       const userData = { 
         id: data.userId, 
         name: data.name, 
@@ -57,7 +70,14 @@ export function AuthProvider({ children }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, login, logout, register }}>
+    <AuthContext.Provider value={{ 
+      user, 
+      isAuthenticated: !!user, 
+      loading, 
+      login, 
+      logout, 
+      register 
+    }}>
       {children}
     </AuthContext.Provider>
   );

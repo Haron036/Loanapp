@@ -1,4 +1,3 @@
-// src/lib/api.js
 import axios from 'axios';
 
 // ==========================
@@ -62,12 +61,14 @@ export const userApi = {
 // ==========================
 export const loanApi = {
   create: (loanData) => api.post('/loans/apply', loanData),
+  // Matches your RepaymentController: @RequestMapping("/api/repayments")
+  payInstallment: (repaymentId, data) => api.post(`/repayments/${repaymentId}/pay`, data),
   getUserLoans: (page = 0, size = 10) => api.get('/loans/my-loans', { params: { page, size } }),
   getById: (id) => api.get(`/loans/${id}`),
   getSummary: () => api.get('/loans/summary'),
   getRepayments: (loanId) => api.get(`/loans/${loanId}/repayments`),
   
-  // ADMIN/MANAGEMENT ACTIONS
+  // ADMIN ACTIONS
   approve: (id, data) => api.put(`/loans/${id}/approve`, data), 
   reject: (id, data) => api.put(`/loans/${id}/reject`, data),
   disburse: (id) => api.put(`/loans/${id}/disburse`),
@@ -87,28 +88,20 @@ export const adminApi = {
 // ==========================
 // UTILITIES
 // ==========================
-
-/**
- * Formats numbers to Kenyan Shillings (KSh)
- * Example: 50000 -> KSh 50,000
- */
 export function formatCurrency(amount) {
   return new Intl.NumberFormat('en-KE', { 
     style: 'currency', 
     currency: 'KES',
     minimumFractionDigits: 0,
     maximumFractionDigits: 0
-  }).format(amount || 0)
-    .replace('KES', 'KSh'); // Standard Kenyan display format
+  }).format(amount || 0).replace('KES', 'KSh');
 }
 
 export function formatDate(dateString) {
   if (!dateString) return 'N/A';
   try {
-    return new Intl.DateTimeFormat('en-GB', { // en-GB uses DD/MM/YYYY
-      year: 'numeric', 
-      month: 'short', 
-      day: 'numeric' 
+    return new Intl.DateTimeFormat('en-GB', { 
+      year: 'numeric', month: 'short', day: 'numeric' 
     }).format(new Date(dateString));
   } catch (e) { return 'Invalid Date'; }
 }
