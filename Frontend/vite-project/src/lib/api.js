@@ -4,7 +4,7 @@ import axios from 'axios';
 // BASE AXIOS INSTANCE
 // ==========================
 const api = axios.create({
-  baseURL: 'http://localhost:8080/api',
+  baseURL: 'https://loanapi-8yw7.onrender.com',
   headers: { 'Content-Type': 'application/json' },
 });
 
