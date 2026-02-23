@@ -334,7 +334,7 @@ const SuccessState = ({ onDashboard }) => (
       <div className="relative bg-emerald-500 text-white p-6 rounded-full shadow-xl">
         <CheckCircle size={60} strokeWidth={3} />
       </div>
-    </div>
+    </div>  
     
     <h2 className="text-3xl font-black text-green-500 mb-4">Application Received!</h2>
     <p className="text-green-500 max-w-sm mb-8 leading-relaxed">
