@@ -276,20 +276,16 @@ export default function Dashboard() {
               <CardContent className="space-y-6">
                 {userLoans.length > 0 ? (
                   userLoans.map((loan) => {
-                    const principal = Number(loan.amount || 0);
-                    const interestRate = Number(loan.interestRate || 0);
-                    const totalRepaid = Number(loan.totalRepaid || 0);
-
+                    // --- Calculate totals dynamically ---
                     const totalWithInterest =
-                      principal + principal * (interestRate / 100);
-
-                    const safeTotal =
-                      totalWithInterest > 0 ? totalWithInterest : 1;
-
+                      loan.amount + loan.amount * (loan.interestRate / 100);
+                    const paid = loan.totalRepaid || 0;
+                    const remaining = Math.max(totalWithInterest - paid, 0); // Prevent negative
                     const progress = Math.min(
-                      Math.max(Math.round((totalRepaid / safeTotal) * 100), 0),
+                      Math.round((paid / totalWithInterest) * 100),
                       100,
                     );
+
                     return (
                       <div
                         key={loan.id}
@@ -330,12 +326,8 @@ export default function Dashboard() {
                             />
                           </div>
                           <div className="flex justify-between text-[10px] text-muted-foreground">
-                            <span>
-                              Paid: {formatCurrency(loan.totalRepaid || 0)}
-                            </span>
-                            <span>
-                              Target: {formatCurrency(totalWithInterest)}
-                            </span>
+                            <span>Paid: {formatCurrency(paid)}</span>
+                            <span>Target: {formatCurrency(remaining)}</span>
                           </div>
                         </div>
 
