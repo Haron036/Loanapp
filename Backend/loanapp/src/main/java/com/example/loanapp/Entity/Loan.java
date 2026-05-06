@@ -47,6 +47,7 @@ public class Loan {
     @Column(precision = 12, scale = 2)
     private BigDecimal monthlyPayment;
 
+
     @Column(precision = 12, scale = 2)
     @Builder.Default
     private BigDecimal totalRepaid = BigDecimal.ZERO;
